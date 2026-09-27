@@ -7,7 +7,6 @@ use crate::road::{
 };
 use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
 use crate::terrain::HeightmapData;
-use crate::vegetation::{compute_tree_positions, create_pine_tree_mesh, VegetationMarker};
 
 /// Message type decoupling UI button clicks and hotkeys from editor state mutations
 #[derive(Message, Clone, Debug)]
@@ -55,7 +54,6 @@ impl Plugin for RoadEditorPlugin {
                     apply_editor_actions.in_set(EditorSet::ApplyActions),
                     (
                         update_road_mesh_system,
-                        update_vegetation_system,
                         update_ride_along_camera,
                     )
                         .in_set(EditorSet::MeshRebuild),
@@ -71,8 +69,8 @@ pub struct RoadPostMarker;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EditorTool {
-    Add,
     SelectMove,
+    Add,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -105,6 +103,11 @@ pub struct EditorState {
     pub total_length: f32,
     pub max_grade: f32,
     pub samples: Vec<SplineSample>,
+
+    // Dynamic Tree Avoidance Tracking
+    pub road_version: usize,
+    pub displaced_trees_count: usize,
+    pub total_trees_count: usize,
 
     // Ride-along mode
     pub ride_along: bool,
@@ -147,6 +150,10 @@ impl Default for EditorState {
             total_length: 0.0,
             max_grade: 0.0,
             samples: Vec::new(),
+
+            road_version: 0,
+            displaced_trees_count: 0,
+            total_trees_count: 0,
 
             ride_along: false,
             ride_dist: 0.0,
@@ -547,6 +554,7 @@ pub fn update_road_mesh_system(
     }
     state.max_grade = max_gr;
     state.samples = samples.clone();
+    state.road_version = state.road_version.wrapping_add(1);
 
     // 2. Clear old road mesh, pylons, and roadside posts
     for ent in road_query.iter() {
@@ -597,37 +605,6 @@ pub fn update_road_mesh_system(
         Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
         RoadPostMarker,
     )));
-}
-
-/// Updates tree clearing around road when road is modified
-pub fn update_vegetation_system(
-    mut commands: Commands,
-    state: Res<EditorState>,
-    tree_mesh_handle: Res<TreeMeshHandle>,
-    tree_mat_handle: Res<TreeMaterialHandle>,
-    heightmap: Res<HeightmapData>,
-    trees_query: Query<Entity, With<VegetationMarker>>,
-) {
-    if !state.is_changed() && !state.dirty {
-        return;
-    }
-
-    if state.is_added() || state.dirty {
-        for ent in trees_query.iter() {
-            commands.entity(ent).despawn();
-        }
-
-        let tree_positions = compute_tree_positions(&state.samples, &heightmap);
-        let t_mesh = tree_mesh_handle.0.clone();
-        let t_mat = tree_mat_handle.0.clone();
-
-        commands.spawn_batch(tree_positions.into_iter().map(move |(pos, scale)| (
-            Mesh3d(t_mesh.clone()),
-            MeshMaterial3d(t_mat.clone()),
-            Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
-            VegetationMarker,
-        )));
-    }
 }
 
 /// Handles the Ride-Along camera mode (F key)
@@ -732,20 +709,7 @@ pub fn setup_materials_and_assets(
     });
     commands.insert_resource(PylonMaterialHandle(pylon_mat_handle));
 
-    // 3. Pine Tree Asset & Material
-    let pine_mesh = create_pine_tree_mesh();
-    let pine_mesh_handle = meshes.add(pine_mesh);
-    commands.insert_resource(TreeMeshHandle(pine_mesh_handle));
-
-    let tree_mat_handle = materials.add(StandardMaterial {
-        base_color: Color::WHITE, // Vertex colors supply the trunk and needle colors
-        perceptual_roughness: 0.9,
-        metallic: 0.0,
-        ..default()
-    });
-    commands.insert_resource(TreeMaterialHandle(tree_mat_handle));
-
-    // 4. Roadside Delineator Post Mesh & Material
+    // 3. Roadside Delineator Post Mesh & Material
     let post_mesh_handle = meshes.add(Cuboid::new(0.12, 0.9, 0.12));
     commands.insert_resource(PostMeshHandle(post_mesh_handle));
 
@@ -757,7 +721,7 @@ pub fn setup_materials_and_assets(
     });
     commands.insert_resource(PostMaterialHandle(post_mat_handle));
 
-    // 5. Load initial scenic road preset
+    // 4. Load initial scenic road preset
     load_preset(&mut editor_state, 1, &heightmap);
 }
 
@@ -769,12 +733,6 @@ pub struct RoadMaterialHandle(pub Handle<StandardMaterial>);
 
 #[derive(Resource)]
 pub struct PylonMaterialHandle(pub Handle<StandardMaterial>);
-
-#[derive(Resource)]
-pub struct TreeMeshHandle(pub Handle<Mesh>);
-
-#[derive(Resource)]
-pub struct TreeMaterialHandle(pub Handle<StandardMaterial>);
 
 #[derive(Resource)]
 pub struct PostMeshHandle(pub Handle<Mesh>);

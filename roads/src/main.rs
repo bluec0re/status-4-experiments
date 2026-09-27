@@ -11,12 +11,13 @@ use camera::CameraPlugin;
 use editor::RoadEditorPlugin;
 use terrain::TerrainPlugin;
 use ui::UiPlugin;
+use vegetation::VegetationPlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Bevy Spline Road Editor - Realistic Landscape & Water".into(),
+                title: "Bevy Spline Road Editor - Realistic Landscape & Dynamic Trees".into(),
                 resolution: (1600u32, 950u32).into(),
                 ..default()
             }),
@@ -26,6 +27,7 @@ fn main() {
             CameraPlugin,
             TerrainPlugin,
             RoadEditorPlugin,
+            VegetationPlugin,
             UiPlugin,
         ))
         .run();

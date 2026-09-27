@@ -108,15 +108,15 @@ pub fn setup_ui(mut commands: Commands) {
                                 WATER_THRESHOLD
                             )),
                             TextFont {
-                                font_size: FontSize::Px(11.0),
+                                font_size: FontSize::Px(12.0),
                                 ..default()
                             },
-                            TextColor(Color::srgb(0.60, 0.78, 0.90)),
+                            TextColor(Color::srgb(0.55, 0.65, 0.75)),
                         ));
 
-                        // Dynamic Stats Text
+                        // Dynamic Stats Line
                         card.spawn((
-                            Text::new("Length: 0.0 m | Nodes: 0 | Grade: 0.0%"),
+                            Text::new("Length: 0.0 m | Nodes: 0 | Grade: 0.0% | Trees Cleared: 0/0"),
                             TextFont {
                                 font_size: FontSize::Px(13.0),
                                 ..default()
@@ -125,307 +125,308 @@ pub fn setup_ui(mut commands: Commands) {
                             StatsTextMarker,
                         ));
 
-                        // Dynamic Node Details
+                        // Selected Node Details
                         card.spawn((
-                            Text::new("No node selected"),
+                            Text::new("No node selected (Click a waypoint or ground)"),
                             TextFont {
                                 font_size: FontSize::Px(12.0),
                                 ..default()
                             },
-                            TextColor(Color::srgb(0.70, 0.80, 0.90)),
+                            TextColor(Color::srgb(0.65, 0.85, 0.95)),
                             NodeInfoTextMarker,
                         ));
                     });
 
-                // Top Right: Control Panel (Row 1: Presets & Tools, Row 2: Road Width & Lanes)
+                // Top Right: Controls & Presets Panel
                 top_row
                     .spawn((
                         Node {
                             flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(12.0)),
                             row_gap: Val::Px(8.0),
+                            border: UiRect::all(Val::Px(1.0)),
                             align_items: AlignItems::FlexEnd,
                             ..default()
                         },
+                        BackgroundColor(Color::srgba(0.08, 0.10, 0.14, 0.88)),
+                        BorderColor::all(Color::srgba(0.3, 0.4, 0.5, 0.4)),
                     ))
-                    .with_children(|ctrl_col| {
-                        // Row 1: Presets & General Tools
-                        ctrl_col
+                    .with_children(|actions_panel| {
+                        // Row 1: Tool & View Actions
+                        actions_panel
                             .spawn((
                                 Node {
                                     flex_direction: FlexDirection::Row,
                                     column_gap: Val::Px(8.0),
-                                    align_items: AlignItems::Center,
                                     ..default()
                                 },
                             ))
-                            .with_children(|btn_bar| {
-                                // Tool Mode Toggle
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.18, 0.24, 0.35, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.6, 0.8, 0.7)),
-                                    ToolBtnMarker,
-                                )).with_child((
-                                    Text::new("Tool: Select (T)"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                    ToolBtnTextMarker,
-                                ));
+                            .with_children(|btn_row| {
+                                // Tool toggle button
+                                btn_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.18, 0.25, 0.35, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.6, 0.8, 0.6)),
+                                        ToolBtnMarker,
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("Tool: Select (T)"),
+                                            TextFont {
+                                                font_size: FontSize::Px(12.0),
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                            ToolBtnTextMarker,
+                                        ));
+                                    });
 
-                                // Preset 1: Town Boulevard
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    PresetBtnMarker(1),
-                                )).with_child((
-                                    Text::new("1: Town Blvd"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                // Ride-along camera button
+                                btn_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.2, 0.35, 0.25, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.8, 0.5, 0.6)),
+                                        RideBtnMarker,
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("Ride (F)"),
+                                            TextFont {
+                                                font_size: FontSize::Px(12.0),
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
 
-                                // Preset 2: River Bridge Expressway
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    PresetBtnMarker(2),
-                                )).with_child((
-                                    Text::new("2: River Bridge"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
-
-                                // Preset 3: Ring Road
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    PresetBtnMarker(3),
-                                )).with_child((
-                                    Text::new("3: Ring Road"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
-
-                                // Clear
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    ClearBtnMarker,
-                                )).with_child((
-                                    Text::new("Clear (C)"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
-
-                                // Ride Along
-                                btn_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    RideBtnMarker,
-                                )).with_child((
-                                    Text::new("Ride (F)"),
-                                    TextFont { font_size: FontSize::Px(12.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                // Clear Road button
+                                btn_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.35, 0.15, 0.15, 0.9)),
+                                        BorderColor::all(Color::srgba(0.8, 0.3, 0.3, 0.6)),
+                                        ClearBtnMarker,
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("Clear (C)"),
+                                            TextFont {
+                                                font_size: FontSize::Px(12.0),
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
                             });
 
-                        // Row 2: Road Width & Lanes Toolbar
-                        ctrl_col
+                        // Row 2: Road Presets
+                        actions_panel
                             .spawn((
                                 Node {
                                     flex_direction: FlexDirection::Row,
                                     column_gap: Val::Px(6.0),
                                     align_items: AlignItems::Center,
-                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                                    border: UiRect::all(Val::Px(1.0)),
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgba(0.08, 0.10, 0.15, 0.88)),
-                                BorderColor::all(Color::srgba(0.3, 0.4, 0.55, 0.5)),
                             ))
-                            .with_children(|width_bar| {
-                                width_bar.spawn((
-                                    Text::new("Road Width:"),
-                                    TextFont { font_size: FontSize::Px(11.5), ..default() },
-                                    TextColor(Color::srgb(0.75, 0.85, 0.95)),
-                                ));
-
-                                // Mode toggle button (Lanes vs Seamless)
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
+                            .with_children(|p_row| {
+                                p_row.spawn((
+                                    Text::new("Presets:"),
+                                    TextFont {
+                                        font_size: FontSize::Px(12.0),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::srgba(0.18, 0.24, 0.35, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.6, 0.8, 0.7)),
-                                    WidthModeBtnMarker,
-                                )).with_child((
-                                    Text::new("Mode: Lanes (L)"),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                    WidthModeBtnTextMarker,
+                                    TextColor(Color::srgb(0.7, 0.75, 0.8)),
                                 ));
 
-                                // 1 Lane button
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
+                                let presets = [
+                                    (1, "1: Town Blvd"),
+                                    (2, "2: River Bridge"),
+                                    (3, "3: Ring Road"),
+                                ];
+
+                                for (idx, label) in presets {
+                                    p_row
+                                        .spawn((
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                                border: UiRect::all(Val::Px(1.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.15, 0.22, 0.32, 0.9)),
+                                            BorderColor::all(Color::srgba(0.3, 0.5, 0.7, 0.5)),
+                                            PresetBtnMarker(idx),
+                                        ))
+                                        .with_children(|b| {
+                                            b.spawn((
+                                                Text::new(label),
+                                                TextFont {
+                                                    font_size: FontSize::Px(11.5),
+                                                    ..default()
+                                                },
+                                                TextColor(Color::WHITE),
+                                            ));
+                                        });
+                                }
+                            });
+
+                        // Row 3: Road Width & Multi-Lane Configuration
+                        actions_panel
+                            .spawn((
+                                Node {
+                                    flex_direction: FlexDirection::Row,
+                                    column_gap: Val::Px(6.0),
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|w_row| {
+                                w_row.spawn((
+                                    Text::new("Width:"),
+                                    TextFont {
+                                        font_size: FontSize::Px(12.0),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    LaneBtnMarker(1),
-                                )).with_child((
-                                    Text::new("1 Lane"),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
+                                    TextColor(Color::srgb(0.7, 0.75, 0.8)),
                                 ));
 
-                                // 2 Lanes button
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    LaneBtnMarker(2),
-                                )).with_child((
-                                    Text::new("2 Lanes"),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                // Mode Toggle (Lanes vs Seamless)
+                                w_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.18, 0.24, 0.35, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.6, 0.8, 0.7)),
+                                        WidthModeBtnMarker,
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("Mode: Lanes (L)"),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.5),
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.9, 0.9, 1.0)),
+                                            WidthModeBtnTextMarker,
+                                        ));
+                                    });
 
-                                // 4 Lanes button
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    LaneBtnMarker(4),
-                                )).with_child((
-                                    Text::new("4 Lanes"),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                // Quick Lanes buttons
+                                let lanes_btns = [
+                                    (1, "1 Lane"),
+                                    (2, "2 Lanes"),
+                                    (4, "4 Lanes"),
+                                ];
 
-                                // -0.5m button
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    WidthAdjustBtnMarker(-0.5),
-                                )).with_child((
-                                    Text::new("- ["),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                for (lanes, label) in lanes_btns {
+                                    w_row
+                                        .spawn((
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                                border: UiRect::all(Val::Px(1.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
+                                            BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
+                                            LaneBtnMarker(lanes),
+                                        ))
+                                        .with_children(|b| {
+                                            b.spawn((
+                                                Text::new(label),
+                                                TextFont {
+                                                    font_size: FontSize::Px(11.5),
+                                                    ..default()
+                                                },
+                                                TextColor(Color::WHITE),
+                                            ));
+                                        });
+                                }
 
-                                // +0.5m button
-                                width_bar.spawn((
-                                    Button,
-                                    Node {
-                                        padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(0.15, 0.18, 0.25, 0.9)),
-                                    BorderColor::all(Color::srgba(0.4, 0.5, 0.65, 0.6)),
-                                    WidthAdjustBtnMarker(0.5),
-                                )).with_child((
-                                    Text::new("+ ]"),
-                                    TextFont { font_size: FontSize::Px(11.0), ..default() },
-                                    TextColor(Color::srgb(0.95, 0.95, 0.98)),
-                                ));
+                                // Narrower [-]
+                                w_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.4, 0.5, 0.6)),
+                                        WidthAdjustBtnMarker(-0.5),
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("[-]"),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.5),
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
+
+                                // Wider [+]
+                                w_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.4, 0.5, 0.6)),
+                                        WidthAdjustBtnMarker(0.5),
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("[+]"),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.5),
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+                                    });
                             });
                     });
             });
 
-            // BOTTOM BAR: Controls Cheat Sheet
+            // BOTTOM BAR: Controls Reference Cheat Sheet
             root.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(12.0)),
                     row_gap: Val::Px(4.0),
                     border: UiRect::all(Val::Px(1.0)),
-                    max_width: Val::Px(680.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.84)),
-                BorderColor::all(Color::srgba(0.25, 0.35, 0.45, 0.4)),
+                BackgroundColor(Color::srgba(0.06, 0.08, 0.12, 0.90)),
+                BorderColor::all(Color::srgba(0.3, 0.4, 0.5, 0.4)),
             ))
             .with_children(|help_box| {
                 help_box.spawn((
@@ -441,6 +442,7 @@ pub fn setup_ui(mut commands: Commands) {
                     "• WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
                     "• Mouse Scroll: Zoom In / Out (Tracks landscape height smoothly)",
                     "• Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
+                    "• Dynamic Trees: Trees organically part and move out of the way as roads are created or dragged",
                     "• R / V: Raise / Lower Node Elevation (Bridge Viaducts & Pylons)",
                     "• Delete / X: Remove Selected Node  |  [ / ]: Adjust Road Width (L: Toggle Lanes / Seamless)",
                     "• Road Width Buttons: 1 Lane (4m), 2 Lanes (8m), 4 Lanes (15m) or Seamless Continuous",
@@ -540,7 +542,7 @@ pub fn update_ui_system(
     };
 
     let stats_text = format!(
-        "Tool: {} | Width: {:.1}m ({}, {}) | Length: {:.1} m | Nodes: {} | Max Grade: {:.1}% ({})",
+        "Tool: {} | Width: {:.1}m ({}, {}) | Length: {:.1}m | Nodes: {} | Grade: {:.1}% ({}) | Trees Cleared: {}/{}",
         tool_str,
         state.road_width,
         lane_label,
@@ -548,7 +550,9 @@ pub fn update_ui_system(
         state.total_length,
         state.waypoints.len(),
         state.max_grade,
-        grade_desc
+        grade_desc,
+        state.displaced_trees_count,
+        state.total_trees_count,
     );
 
     for mut text in stats_query.iter_mut() {
@@ -627,9 +631,11 @@ pub fn handle_button_clicks(
                 }
             }
             Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.22, 0.28, 0.38, 0.95));
+                *bg_color = BackgroundColor(Color::srgba(0.25, 0.35, 0.48, 0.95));
             }
-            Interaction::None => {}
+            Interaction::None => {
+                // Handled in update_ui_system based on state
+            }
         }
     }
 }
