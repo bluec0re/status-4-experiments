@@ -557,7 +557,7 @@ pub fn setup_ui(mut commands: Commands) {
                     "• Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
                     "• N: New Street  |  Click existing node in Add mode to branch / join into a Junction",
                     "• Drag node onto another: Magnetic Snap & Join  |  J: Join to nearest street | Tab: Cycle Street",
-                    "• K: Cycle Junction Style (Box Junction, Turning Circle, Zebra Crossings)",
+                    "• K: Cycle Junction Style (Box Junction, Turning Circle, Zebra Crossings) | P: Toggle Elevation (Warped / Planar)",
                     "• Dynamic Trees: Trees organically part and move out of the way as roads are created or dragged",
                     "• R / V: Raise / Lower Node Elevation (Bridge Viaducts & Pylons)",
                     "• Delete / X: Remove Selected Node  |  [ / ]: Adjust Road Width (L: Toggle Lanes / Seamless)",
@@ -666,7 +666,7 @@ pub fn update_ui_system(
     }
 
     for mut text in junc_style_btn_text.iter_mut() {
-        text.0 = format!("Junc: {} (K)", state.junction_style.display_name());
+        text.0 = format!("Junc: {} / {} (K/P)", state.junction_style.display_name(), state.junction_elevation_mode.display_name());
     }
 
     let mode_desc = match state.width_mode {

@@ -472,9 +472,9 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JunctionStyle {
     #[default]
-    BoxMarking,     // Yellow criss-cross intersection box with stop bars & rubber swept paths
-    TurningCircle,  // Central dashed turning roundabout guide circle & stop bars
-    Continental,    // Pedestrian zebra crossings along entrance mouths & clean asphalt
+    BoxMarking, // Yellow criss-cross intersection box with stop bars & rubber swept paths
+    TurningCircle, // Central dashed turning roundabout guide circle & stop bars
+    Continental,   // Pedestrian zebra crossings along entrance mouths & clean asphalt
 }
 
 impl JunctionStyle {
@@ -491,6 +491,31 @@ impl JunctionStyle {
             Self::BoxMarking => "Box",
             Self::TurningCircle => "Circle",
             Self::Continental => "Zebra",
+        }
+    }
+}
+
+/// Controls whether crossings (junctions) warp their deck to match incoming road elevations,
+/// or remain a rigid horizontal plane with incoming roads ramping smoothly to attach to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JunctionElevationMode {
+    #[default]
+    Warped, // Junction deck warps smoothly to match incoming road elevations
+    Planar, // Junction deck is always a flat plane (y = junction.pos.y) and incoming roads ramp/attach to it
+}
+
+impl JunctionElevationMode {
+    pub fn toggle(&self) -> Self {
+        match self {
+            Self::Warped => Self::Planar,
+            Self::Planar => Self::Warped,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Warped => "Warped",
+            Self::Planar => "Planar",
         }
     }
 }
@@ -576,7 +601,8 @@ pub fn create_junction_texture(style: JunctionStyle) -> Image {
                     let box_half_w = 0.24;
                     let in_box = cx.abs() < box_half_w && cy.abs() < box_half_w;
                     if in_box {
-                        let is_box_border = cx.abs() > (box_half_w - 0.018) || cy.abs() > (box_half_w - 0.018);
+                        let is_box_border =
+                            cx.abs() > (box_half_w - 0.018) || cy.abs() > (box_half_w - 0.018);
                         let diag1 = ((cx + cy) * 26.0).sin().abs() < 0.18;
                         let diag2 = ((cx - cy) * 26.0).sin().abs() < 0.18;
                         if is_box_border || diag1 || diag2 {
@@ -681,7 +707,7 @@ impl Street {
 pub struct JunctionArm {
     pub street_idx: usize,
     pub neighbor_node_idx: usize,
-    pub dir: Vec3, // XZ direction pointing away from junction
+    pub dir: Vec3,  // XZ direction pointing away from junction
     pub angle: f32, // atan2(dir.z, dir.x) in radians
     pub width: f32,
     pub mouth_sample: Option<SplineSample>,
@@ -751,7 +777,9 @@ pub fn detect_junctions(waypoints: &[RoadWaypoint], streets: &[Street]) -> Vec<J
             }
         }
 
-        arms.dedup_by(|a, b| a.neighbor_node_idx == b.neighbor_node_idx && a.street_idx == b.street_idx);
+        arms.dedup_by(|a, b| {
+            a.neighbor_node_idx == b.neighbor_node_idx && a.street_idx == b.street_idx
+        });
 
         let unique_streets_count = {
             let mut s_ids: Vec<usize> = arms.iter().map(|a| a.street_idx).collect();
@@ -764,7 +792,11 @@ pub fn detect_junctions(waypoints: &[RoadWaypoint], streets: &[Street]) -> Vec<J
             let max_w = arms.iter().map(|a| a.width).fold(0.0f32, f32::max);
             let radius = (max_w * 0.5 * 1.35).clamp(4.0, 16.0);
 
-            arms.sort_by(|a, b| a.angle.partial_cmp(&b.angle).unwrap_or(std::cmp::Ordering::Equal));
+            arms.sort_by(|a, b| {
+                a.angle
+                    .partial_cmp(&b.angle)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             junctions.push(Junction {
                 node_idx,
@@ -785,6 +817,7 @@ pub fn build_junction_mesh(
     waypoints: &[RoadWaypoint],
     heightmap: &HeightmapData,
     style: JunctionStyle,
+    elevation_mode: JunctionElevationMode,
 ) -> Option<Mesh> {
     let k = junction.connected_arms.len();
     if k < 2 {
@@ -796,7 +829,11 @@ pub fn build_junction_mesh(
     let is_bridge = (center_pos.y - ground_center) > 2.8;
 
     let r = junction.radius;
-    let max_extent = junction.connected_arms.iter().map(|a| a.width * 0.5 + r).fold(r * 1.35, f32::max);
+    let max_extent = junction
+        .connected_arms
+        .iter()
+        .map(|a| a.width * 0.5 + r)
+        .fold(r * 1.35, f32::max);
 
     // Helper to evaluate exact road elevation at arm mouth from connected street waypoint slope (fallback)
     let get_arm_elevation = |arm: &JunctionArm, mouth_xz: Vec2| -> f32 {
@@ -819,34 +856,86 @@ pub fn build_junction_mesh(
     };
 
     // Compute exact deck points (left, center_crown, right) for each arm mouth
-    let mut arm_mouth_pts: Vec<(Vec3, Vec3, Vec3)> = Vec::with_capacity(k);
-    for arm in &junction.connected_arms {
-        let d = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
-        let right_arm = Vec3::new(-d.z, 0.0, d.x);
-        let half_w = arm.width * 0.5;
+    let (center_elev, arm_mouth_pts) = match elevation_mode {
+        JunctionElevationMode::Warped => {
+            let mut pts: Vec<(Vec3, Vec3, Vec3)> = Vec::with_capacity(k);
+            for arm in &junction.connected_arms {
+                let d = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
+                let right_arm = Vec3::new(-d.z, 0.0, d.x);
+                let half_w = arm.width * 0.5;
 
-        let mouth_pts = if let Some(ref sample) = arm.mouth_sample {
-            let (l, c, r_pt) = compute_road_deck_points(sample, heightmap);
-            let outward = Vec3::new(sample.pos.x - center_pos.x, 0.0, sample.pos.z - center_pos.z).normalize_or_zero();
-            let sample_right = Vec3::new(-outward.z, 0.0, outward.x);
-            if sample.normal.dot(sample_right) >= 0.0 {
-                (l, c, r_pt)
-            } else {
-                (r_pt, c, l)
+                let mouth_pts = if let Some(ref sample) = arm.mouth_sample {
+                    let (l, c, r_pt) = compute_road_deck_points(sample, heightmap);
+                    let outward = Vec3::new(
+                        sample.pos.x - center_pos.x,
+                        0.0,
+                        sample.pos.z - center_pos.z,
+                    )
+                    .normalize_or_zero();
+                    let sample_right = Vec3::new(-outward.z, 0.0, outward.x);
+                    if sample.normal.dot(sample_right) >= 0.0 {
+                        (l, c, r_pt)
+                    } else {
+                        (r_pt, c, l)
+                    }
+                } else {
+                    let mouth_center = center_pos + d * r;
+                    let y_c = get_arm_elevation(arm, Vec2::new(mouth_center.x, mouth_center.z));
+                    (
+                        Vec3::new(
+                            mouth_center.x - right_arm.x * half_w,
+                            y_c,
+                            mouth_center.z - right_arm.z * half_w,
+                        ),
+                        Vec3::new(mouth_center.x, y_c + 0.04, mouth_center.z),
+                        Vec3::new(
+                            mouth_center.x + right_arm.x * half_w,
+                            y_c,
+                            mouth_center.z + right_arm.z * half_w,
+                        ),
+                    )
+                };
+                pts.push(mouth_pts);
             }
-        } else {
-            let mouth_center = center_pos + d * r;
-            let y_c = get_arm_elevation(arm, Vec2::new(mouth_center.x, mouth_center.z));
-            (
-                Vec3::new(mouth_center.x - right_arm.x * half_w, y_c, mouth_center.z - right_arm.z * half_w),
-                Vec3::new(mouth_center.x, y_c + 0.04, mouth_center.z),
-                Vec3::new(mouth_center.x + right_arm.x * half_w, y_c, mouth_center.z + right_arm.z * half_w),
-            )
-        };
-        arm_mouth_pts.push(mouth_pts);
-    }
+            let avg_arm_y = pts.iter().map(|(_, c, _)| c.y).sum::<f32>() / (k as f32);
+            let c_elev = if is_bridge {
+                avg_arm_y.max(center_pos.y + 0.04)
+            } else {
+                avg_arm_y.max(ground_center + 0.16)
+            };
+            (c_elev, pts)
+        }
+        JunctionElevationMode::Planar => {
+            let plane_y = center_pos.y;
+            let c_elev = plane_y + 0.04;
+            let mut pts: Vec<(Vec3, Vec3, Vec3)> = Vec::with_capacity(k);
+            for arm in &junction.connected_arms {
+                let d = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
+                let right_arm = Vec3::new(-d.z, 0.0, d.x);
+                let half_w = arm.width * 0.5;
 
-    let avg_arm_y = arm_mouth_pts.iter().map(|(_, c, _)| c.y).sum::<f32>() / (k as f32);
+                let mouth_center = if let Some(ref sample) = arm.mouth_sample {
+                    Vec3::new(sample.pos.x, plane_y, sample.pos.z)
+                } else {
+                    center_pos + d * r
+                };
+                pts.push((
+                    Vec3::new(
+                        mouth_center.x - right_arm.x * half_w,
+                        plane_y,
+                        mouth_center.z - right_arm.z * half_w,
+                    ),
+                    Vec3::new(mouth_center.x, plane_y + 0.04, mouth_center.z),
+                    Vec3::new(
+                        mouth_center.x + right_arm.x * half_w,
+                        plane_y,
+                        mouth_center.z + right_arm.z * half_w,
+                    ),
+                ));
+            }
+            (c_elev, pts)
+        }
+    };
 
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
@@ -854,12 +943,7 @@ pub fn build_junction_mesh(
     let mut colors: Vec<[f32; 4]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    // Center vertex (index 0) warped smoothly to average connected arm height
-    let center_elev = if is_bridge {
-        avg_arm_y.max(center_pos.y + 0.04)
-    } else {
-        avg_arm_y.max(ground_center + 0.16)
-    };
+    // Center vertex (index 0)
     positions.push([center_pos.x, center_elev, center_pos.z]);
     normals.push([0.0, 1.0, 0.0]);
     uvs.push([0.5, 0.5]);
@@ -887,14 +971,19 @@ pub fn build_junction_mesh(
         let d_next = Vec3::new(arm_next.dir.x, 0.0, arm_next.dir.z).normalize_or_zero();
 
         let corner_dir_sum = d_curr + d_next;
-        let corner_apex_y = (pt_arm_right.y + pt_next_left.y) * 0.5;
+        let corner_apex_y = match elevation_mode {
+            JunctionElevationMode::Warped => (pt_arm_right.y + pt_next_left.y) * 0.5,
+            JunctionElevationMode::Planar => center_pos.y,
+        };
         let corner_apex = if corner_dir_sum.length_squared() < 0.05 {
             // Straight through-street (180 degrees)
             (pt_arm_right + pt_next_left) * 0.5
         } else {
             let corner_dir = corner_dir_sum.normalize();
-            let dist_curr = Vec2::new(pt_arm_right.x - center_pos.x, pt_arm_right.z - center_pos.z).length();
-            let dist_next = Vec2::new(pt_next_left.x - center_pos.x, pt_next_left.z - center_pos.z).length();
+            let dist_curr =
+                Vec2::new(pt_arm_right.x - center_pos.x, pt_arm_right.z - center_pos.z).length();
+            let dist_next =
+                Vec2::new(pt_next_left.x - center_pos.x, pt_next_left.z - center_pos.z).length();
             let corner_dist = dist_curr.max(dist_next);
             let corner_apex_xz = center_pos + corner_dir * corner_dist;
             Vec3::new(corner_apex_xz.x, corner_apex_y, corner_apex_xz.z)
@@ -907,7 +996,9 @@ pub fn build_junction_mesh(
                 + corner_apex * (2.0 * one_minus_t * t)
                 + pt_next_left * (t * t);
 
-            if !is_bridge {
+            if elevation_mode == JunctionElevationMode::Planar {
+                pt_fillet.y = center_pos.y;
+            } else if !is_bridge {
                 let g = heightmap.sample(pt_fillet.x, pt_fillet.z);
                 pt_fillet.y = pt_fillet.y.max(g + 0.12);
             }
@@ -960,7 +1051,8 @@ pub fn build_junction_mesh(
         let mut corner_skirt_indices = Vec::with_capacity(5);
         for &deck_p_idx in &corner_deck_indices {
             let pt = perimeter_pts[deck_p_idx];
-            let outward = Vec3::new(pt.x - center_pos.x, 0.0, pt.z - center_pos.z).normalize_or_zero();
+            let outward =
+                Vec3::new(pt.x - center_pos.x, 0.0, pt.z - center_pos.z).normalize_or_zero();
             let skirt_x = pt.x + outward.x * 3.8;
             let skirt_z = pt.z + outward.z * 3.8;
             let skirt_y = if is_bridge {
@@ -1069,7 +1161,8 @@ pub fn build_junction_mesh(
                 let avail_w = (road_w - 2.0 * margin).max(0.6);
                 let num_stripes = ((avail_w + gap_w) / period).floor() as usize;
                 let num_stripes = num_stripes.max(1);
-                let total_stripes_w = num_stripes as f32 * stripe_w + (num_stripes - 1) as f32 * gap_w;
+                let total_stripes_w =
+                    num_stripes as f32 * stripe_w + (num_stripes - 1) as f32 * gap_w;
                 let start_w = margin + (avail_w - total_stripes_w) * 0.5;
 
                 let crossing_len = (r * 0.35).clamp(2.4, 3.0);
@@ -1130,7 +1223,10 @@ pub fn build_junction_mesh(
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -1140,6 +1236,86 @@ pub fn build_junction_mesh(
     Some(mesh)
 }
 
+/// Smoothly transitions a road segment's elevation, banking, and slope
+/// so it attaches flush to a planar horizontal junction deck.
+pub fn smooth_attach_segment_to_junctions(
+    segment: &mut [SplineSample],
+    start_junc_y: Option<f32>,
+    end_junc_y: Option<f32>,
+) {
+    let n = segment.len();
+    if n < 2 {
+        return;
+    }
+
+    let total_len = (segment[n - 1].distance - segment[0].distance)
+        .abs()
+        .max(0.1);
+    let ramp_dist = 22.0f32.min(total_len * 0.45);
+
+    // Smooth ramp connecting to start junction
+    if let Some(y_start) = start_junc_y
+        && ramp_dist > 0.5
+    {
+        segment[0].pos.y = y_start;
+        segment[0].tangent =
+            Vec3::new(segment[0].tangent.x, 0.0, segment[0].tangent.z).normalize_or_zero();
+        segment[0].normal =
+            Vec3::new(segment[0].normal.x, 0.0, segment[0].normal.z).normalize_or_zero();
+        segment[0].binormal = Vec3::Y;
+        segment[0].banking = 0.0;
+        segment[0].grade = 0.0;
+
+        let start_d = segment[0].distance;
+        for s in segment.iter_mut().skip(1) {
+            let d = s.distance - start_d;
+            if d >= ramp_dist {
+                break;
+            }
+            let u = (d / ramp_dist).clamp(0.0, 1.0);
+            let w = 1.0 - (u * u * (3.0 - 2.0 * u));
+            s.pos.y = s.pos.y * (1.0 - w) + y_start * w;
+            s.banking *= 1.0 - w;
+            s.tangent.y *= 1.0 - w;
+            s.tangent = s.tangent.normalize_or_zero();
+            s.normal.y *= 1.0 - w;
+            s.normal = s.normal.normalize_or_zero();
+            s.binormal = s.binormal.lerp(Vec3::Y, w).normalize_or_zero();
+        }
+    }
+
+    // Smooth ramp connecting to end junction
+    if let Some(y_end) = end_junc_y
+        && ramp_dist > 0.5
+    {
+        segment[n - 1].pos.y = y_end;
+        segment[n - 1].tangent =
+            Vec3::new(segment[n - 1].tangent.x, 0.0, segment[n - 1].tangent.z).normalize_or_zero();
+        segment[n - 1].normal =
+            Vec3::new(segment[n - 1].normal.x, 0.0, segment[n - 1].normal.z).normalize_or_zero();
+        segment[n - 1].binormal = Vec3::Y;
+        segment[n - 1].banking = 0.0;
+        segment[n - 1].grade = 0.0;
+
+        let end_d = segment[n - 1].distance;
+        for s in segment.iter_mut().rev().skip(1) {
+            let d = end_d - s.distance;
+            if d >= ramp_dist {
+                break;
+            }
+            let u = (d / ramp_dist).clamp(0.0, 1.0);
+            let w = 1.0 - (u * u * (3.0 - 2.0 * u));
+            s.pos.y = s.pos.y * (1.0 - w) + y_end * w;
+            s.banking *= 1.0 - w;
+            s.tangent.y *= 1.0 - w;
+            s.tangent = s.tangent.normalize_or_zero();
+            s.normal.y *= 1.0 - w;
+            s.normal = s.normal.normalize_or_zero();
+            s.binormal = s.binormal.lerp(Vec3::Y, w).normalize_or_zero();
+        }
+    }
+}
+
 /// Splits a street's spline samples into contiguous segments that lie strictly outside junctions.
 /// When approaching or leaving a junction, accurately calculates the boundary SplineSample at the junction radius
 /// and attaches it to the junction arm, guaranteeing a 100% gapless, perfectly height-aligned seam.
@@ -1147,6 +1323,7 @@ pub fn split_street_samples(
     street_idx: usize,
     samples: &[SplineSample],
     junctions: &mut [Junction],
+    elevation_mode: JunctionElevationMode,
 ) -> Vec<Vec<SplineSample>> {
     if samples.is_empty() {
         return Vec::new();
@@ -1157,6 +1334,7 @@ pub fn split_street_samples(
 
     let mut segments: Vec<Vec<SplineSample>> = Vec::new();
     let mut current_segment: Vec<SplineSample> = Vec::new();
+    let mut current_start_junc_y: Option<f32> = None;
 
     let find_containing_junction = |pt: Vec3, juncs: &[Junction]| -> Option<(usize, f32)> {
         for (j_idx, j) in juncs.iter().enumerate() {
@@ -1169,7 +1347,8 @@ pub fn split_street_samples(
     };
 
     let attach_arm_sample = |junc: &mut Junction, sample: SplineSample| {
-        let outward = Vec3::new(sample.pos.x - junc.pos.x, 0.0, sample.pos.z - junc.pos.z).normalize_or_zero();
+        let outward = Vec3::new(sample.pos.x - junc.pos.x, 0.0, sample.pos.z - junc.pos.z)
+            .normalize_or_zero();
         let mut best_idx: Option<usize> = None;
         let mut best_dot = -2.0f32;
 
@@ -1183,7 +1362,9 @@ pub fn split_street_samples(
             }
         }
 
-        if let Some(idx) = best_idx && best_dot > -0.2 {
+        if let Some(idx) = best_idx
+            && best_dot > -0.2
+        {
             junc.connected_arms[idx].mouth_sample = Some(sample);
         }
     };
@@ -1208,13 +1389,37 @@ pub fn split_street_samples(
                 } else {
                     0.5
                 };
-                let boundary_sample = lerp_spline_sample(&s_prev, &s_curr, t);
+                let mut boundary_sample = lerp_spline_sample(&s_prev, &s_curr, t);
+                let end_junc_y = if elevation_mode == JunctionElevationMode::Planar {
+                    boundary_sample.pos.y = j.pos.y;
+                    boundary_sample.tangent =
+                        Vec3::new(boundary_sample.tangent.x, 0.0, boundary_sample.tangent.z)
+                            .normalize_or_zero();
+                    boundary_sample.normal =
+                        Vec3::new(boundary_sample.normal.x, 0.0, boundary_sample.normal.z)
+                            .normalize_or_zero();
+                    boundary_sample.binormal = Vec3::Y;
+                    boundary_sample.banking = 0.0;
+                    boundary_sample.grade = 0.0;
+                    Some(j.pos.y)
+                } else {
+                    None
+                };
+
                 current_segment.push(boundary_sample);
 
                 if current_segment.len() >= 2 {
+                    if elevation_mode == JunctionElevationMode::Planar {
+                        smooth_attach_segment_to_junctions(
+                            &mut current_segment,
+                            current_start_junc_y,
+                            end_junc_y,
+                        );
+                    }
                     segments.push(current_segment);
                 }
                 current_segment = Vec::new();
+                current_start_junc_y = None;
 
                 attach_arm_sample(&mut junctions[j_idx], boundary_sample);
             }
@@ -1223,7 +1428,11 @@ pub fn split_street_samples(
             let mut next_i = i + 1;
             while next_i < n {
                 let s_test = samples[next_i];
-                let d_test = Vec2::new(s_test.pos.x - junctions[j_idx].pos.x, s_test.pos.z - junctions[j_idx].pos.z).length();
+                let d_test = Vec2::new(
+                    s_test.pos.x - junctions[j_idx].pos.x,
+                    s_test.pos.z - junctions[j_idx].pos.z,
+                )
+                .length();
                 if d_test >= junctions[j_idx].radius {
                     break;
                 }
@@ -1242,7 +1451,22 @@ pub fn split_street_samples(
                 } else {
                     0.5
                 };
-                let boundary_sample = lerp_spline_sample(&s_in, &s_out, t);
+                let mut boundary_sample = lerp_spline_sample(&s_in, &s_out, t);
+                if elevation_mode == JunctionElevationMode::Planar {
+                    boundary_sample.pos.y = j.pos.y;
+                    boundary_sample.tangent =
+                        Vec3::new(boundary_sample.tangent.x, 0.0, boundary_sample.tangent.z)
+                            .normalize_or_zero();
+                    boundary_sample.normal =
+                        Vec3::new(boundary_sample.normal.x, 0.0, boundary_sample.normal.z)
+                            .normalize_or_zero();
+                    boundary_sample.binormal = Vec3::Y;
+                    boundary_sample.banking = 0.0;
+                    boundary_sample.grade = 0.0;
+                    current_start_junc_y = Some(j.pos.y);
+                } else {
+                    current_start_junc_y = None;
+                }
 
                 attach_arm_sample(&mut junctions[j_idx], boundary_sample);
                 current_segment.push(boundary_sample);
@@ -1256,6 +1480,9 @@ pub fn split_street_samples(
     }
 
     if current_segment.len() >= 2 {
+        if elevation_mode == JunctionElevationMode::Planar {
+            smooth_attach_segment_to_junctions(&mut current_segment, current_start_junc_y, None);
+        }
         segments.push(current_segment);
     }
 
@@ -1268,7 +1495,7 @@ pub fn split_samples_by_junctions(
     junctions: &[Junction],
 ) -> Vec<Vec<SplineSample>> {
     let mut j_cloned = junctions.to_vec();
-    split_street_samples(0, samples, &mut j_cloned)
+    split_street_samples(0, samples, &mut j_cloned, JunctionElevationMode::default())
 }
 
 /// Generates roadside delineators along road samples, excluding samples inside or near junctions
@@ -1322,11 +1549,11 @@ mod tests {
     #[test]
     fn test_detect_junctions_t_junction_and_crossroads() {
         let waypoints = vec![
-            RoadWaypoint::new(Vec3::new(0.0, 0.0, -20.0), 8.0),  // 0
-            RoadWaypoint::new(Vec3::new(0.0, 0.0, 0.0), 8.0),    // 1 (Junction)
-            RoadWaypoint::new(Vec3::new(0.0, 0.0, 20.0), 8.0),   // 2
-            RoadWaypoint::new(Vec3::new(-20.0, 0.0, 0.0), 8.0),  // 3
-            RoadWaypoint::new(Vec3::new(20.0, 0.0, 0.0), 8.0),   // 4
+            RoadWaypoint::new(Vec3::new(0.0, 0.0, -20.0), 8.0), // 0
+            RoadWaypoint::new(Vec3::new(0.0, 0.0, 0.0), 8.0),   // 1 (Junction)
+            RoadWaypoint::new(Vec3::new(0.0, 0.0, 20.0), 8.0),  // 2
+            RoadWaypoint::new(Vec3::new(-20.0, 0.0, 0.0), 8.0), // 3
+            RoadWaypoint::new(Vec3::new(20.0, 0.0, 0.0), 8.0),  // 4
         ];
 
         // 1. Street 1 (North-South) and Street 2 (West-East forming crossroads at node 1)
@@ -1348,9 +1575,17 @@ mod tests {
         ];
 
         let junctions = detect_junctions(&waypoints, &streets);
-        assert_eq!(junctions.len(), 1, "Should detect exactly one crossroads junction");
+        assert_eq!(
+            junctions.len(),
+            1,
+            "Should detect exactly one crossroads junction"
+        );
         assert_eq!(junctions[0].node_idx, 1);
-        assert_eq!(junctions[0].connected_arms.len(), 4, "Crossroads junction must have 4 arms");
+        assert_eq!(
+            junctions[0].connected_arms.len(),
+            4,
+            "Crossroads junction must have 4 arms"
+        );
 
         // 2. T-junction test: side street branches from node 1 eastward only
         let t_streets = vec![
@@ -1373,7 +1608,11 @@ mod tests {
         let t_junctions = detect_junctions(&waypoints, &t_streets);
         assert_eq!(t_junctions.len(), 1, "Should detect exactly one T-junction");
         assert_eq!(t_junctions[0].node_idx, 1);
-        assert_eq!(t_junctions[0].connected_arms.len(), 3, "T-junction must have 3 arms");
+        assert_eq!(
+            t_junctions[0].connected_arms.len(),
+            3,
+            "T-junction must have 3 arms"
+        );
     }
 
     #[test]
@@ -1445,9 +1684,12 @@ mod tests {
         }
 
         let segments = split_samples_by_junctions(&samples, &[dummy_junction]);
-        assert_eq!(segments.len(), 2, "Should split line crossing junction into 2 segments");
+        assert_eq!(
+            segments.len(),
+            2,
+            "Should split line crossing junction into 2 segments"
+        );
         assert!(segments[0].last().unwrap().pos.x <= -7.0);
         assert!(segments[1].first().unwrap().pos.x >= 7.0);
     }
 }
-

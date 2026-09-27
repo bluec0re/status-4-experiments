@@ -2,7 +2,7 @@ use crate::camera::RtsCamera;
 use crate::road::{
     build_junction_mesh, build_road_mesh, create_junction_texture, create_road_texture,
     detect_junctions, generate_bridge_pylons, generate_road_posts_filtered,
-    split_street_samples, JunctionStyle, RoadMeshMarker, RoadPylonMarker, Street,
+    split_street_samples, JunctionElevationMode, JunctionStyle, RoadMeshMarker, RoadPylonMarker, Street,
 };
 use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
 use crate::terrain::HeightmapData;
@@ -25,6 +25,7 @@ pub enum EditorAction {
     JoinStreets,
     CycleActiveStreet,
     CycleJunctionStyle,
+    ToggleJunctionElevationMode,
 }
 
 /// System sets establishing strict ordering across input, action processing, mesh rebuilding, and post-update
@@ -111,6 +112,7 @@ pub struct EditorState {
     pub samples: Vec<SplineSample>,
     pub junctions_count: usize,
     pub junction_style: JunctionStyle,
+    pub junction_elevation_mode: JunctionElevationMode,
 
     // Dynamic Tree Avoidance Tracking
     pub road_version: usize,
@@ -173,6 +175,7 @@ impl Default for EditorState {
             samples: Vec::new(),
             junctions_count: 0,
             junction_style: JunctionStyle::default(),
+            junction_elevation_mode: JunctionElevationMode::default(),
 
             road_version: 0,
             displaced_trees_count: 0,
@@ -429,6 +432,8 @@ pub fn handle_editor_input(
         action_writer.write(EditorAction::CycleActiveStreet);
     } else if keys.just_pressed(KeyCode::KeyK) {
         action_writer.write(EditorAction::CycleJunctionStyle);
+    } else if keys.just_pressed(KeyCode::KeyP) {
+        action_writer.write(EditorAction::ToggleJunctionElevationMode);
     }
 
     // Toggle Ride-along camera
@@ -714,6 +719,10 @@ pub fn apply_editor_actions(
                 state.junction_style = state.junction_style.next();
                 state.dirty = true;
             }
+            EditorAction::ToggleJunctionElevationMode => {
+                state.junction_elevation_mode = state.junction_elevation_mode.toggle();
+                state.dirty = true;
+            }
             EditorAction::ToggleRideAlong => {
                 if !state.waypoints.is_empty() {
                     state.ride_along = !state.ride_along;
@@ -953,7 +962,7 @@ pub fn update_road_mesh_system(
         }
 
         // Split road spline into segments outside junctions and attach boundary mouth samples to junctions
-        let segments = split_street_samples(street_idx, &samples, &mut junctions);
+        let segments = split_street_samples(street_idx, &samples, &mut junctions, state.junction_elevation_mode);
         for segment in segments {
             let road_mesh = build_road_mesh(&segment, &heightmap);
             let mesh_handle = meshes.add(road_mesh);
@@ -1003,7 +1012,7 @@ pub fn update_road_mesh_system(
 
     // 4. Build junction intersection meshes with dedicated junction material
     for junction in &junctions {
-        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap, state.junction_style) {
+        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap, state.junction_style, state.junction_elevation_mode) {
             let j_handle = meshes.add(j_mesh);
             commands.spawn((
                 Mesh3d(j_handle),
