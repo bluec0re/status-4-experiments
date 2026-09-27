@@ -1003,7 +1003,7 @@ pub fn update_road_mesh_system(
 
     // 4. Build junction intersection meshes with dedicated junction material
     for junction in &junctions {
-        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap) {
+        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap, state.junction_style) {
             let j_handle = meshes.add(j_mesh);
             commands.spawn((
                 Mesh3d(j_handle),

@@ -516,6 +516,19 @@ pub fn create_junction_texture(style: JunctionStyle) -> Image {
             let noise_fine = (((x * 127 + y * 311) ^ (x * 37)) & 0x1F) as f32 / 31.0;
             let noise_coarse = (((x * 53 + y * 89) * 19) & 0x3F) as f32 / 63.0;
 
+            // Dedicated UV corner for white road markings (zebra crossings, stop lines)
+            if u < 0.03 && v < 0.03 {
+                let line_noise = (noise_fine - 0.5) * 10.0;
+                let wr = (248.0 + line_noise).clamp(210.0, 255.0) as u8;
+                let wg = (248.0 + line_noise).clamp(210.0, 255.0) as u8;
+                let wb = (242.0 + line_noise).clamp(205.0, 255.0) as u8;
+                data.push(wr);
+                data.push(wg);
+                data.push(wb);
+                data.push(255);
+                continue;
+            }
+
             // 1. Skirt / Shoulder outer gravel
             if dist > 0.46 {
                 let gravel_noise = (((x * 67 + y * 43) * 73) & 0x3F) as f32 / 63.0;
@@ -555,42 +568,27 @@ pub fn create_junction_texture(style: JunctionStyle) -> Image {
                 b *= oil_darken * 0.95;
             }
 
-            // 4. Markings according to JunctionStyle
+            // 4. Center markings according to JunctionStyle
+            // (Entrance markings like zebra crosswalks & stop lines are generated per road arm in build_junction_mesh)
             match style {
                 JunctionStyle::BoxMarking => {
-                    // Solid white stop bars across entrance mouths at radius 0.408..0.435
-                    let is_stop_bar = dist >= 0.408 && dist <= 0.435;
-                    if is_stop_bar {
-                        let line_noise = (noise_fine - 0.5) * 15.0;
-                        r = (245.0 + line_noise).clamp(190.0, 255.0);
-                        g = (245.0 + line_noise).clamp(190.0, 255.0);
-                        b = (240.0 + line_noise).clamp(185.0, 255.0);
-                    } else {
-                        // Yellow criss-cross box junction in center square
-                        let box_half_w = 0.24;
-                        let in_box = cx.abs() < box_half_w && cy.abs() < box_half_w;
-                        if in_box {
-                            let is_box_border = cx.abs() > (box_half_w - 0.018) || cy.abs() > (box_half_w - 0.018);
-                            let diag1 = ((cx + cy) * 26.0).sin().abs() < 0.18;
-                            let diag2 = ((cx - cy) * 26.0).sin().abs() < 0.18;
-                            if is_box_border || diag1 || diag2 {
-                                let yellow_noise = (noise_fine - 0.5) * 15.0;
-                                r = (246.0 + yellow_noise).clamp(180.0, 255.0);
-                                g = (205.0 + yellow_noise).clamp(150.0, 230.0);
-                                b = (38.0 + yellow_noise).clamp(25.0, 75.0);
-                            }
+                    // Yellow criss-cross box junction in center square
+                    let box_half_w = 0.24;
+                    let in_box = cx.abs() < box_half_w && cy.abs() < box_half_w;
+                    if in_box {
+                        let is_box_border = cx.abs() > (box_half_w - 0.018) || cy.abs() > (box_half_w - 0.018);
+                        let diag1 = ((cx + cy) * 26.0).sin().abs() < 0.18;
+                        let diag2 = ((cx - cy) * 26.0).sin().abs() < 0.18;
+                        if is_box_border || diag1 || diag2 {
+                            let yellow_noise = (noise_fine - 0.5) * 15.0;
+                            r = (246.0 + yellow_noise).clamp(180.0, 255.0);
+                            g = (205.0 + yellow_noise).clamp(150.0, 230.0);
+                            b = (38.0 + yellow_noise).clamp(25.0, 75.0);
                         }
                     }
                 }
                 JunctionStyle::TurningCircle => {
-                    // Solid white stop bar at 0.410..0.432
-                    let is_stop_bar = dist >= 0.410 && dist <= 0.432;
-                    if is_stop_bar {
-                        let line_noise = (noise_fine - 0.5) * 15.0;
-                        r = (245.0 + line_noise).clamp(190.0, 255.0);
-                        g = (245.0 + line_noise).clamp(190.0, 255.0);
-                        b = (240.0 + line_noise).clamp(185.0, 255.0);
-                    } else if dist >= 0.195 && dist <= 0.225 {
+                    if dist >= 0.195 && dist <= 0.225 {
                         // Dashed guidance circle
                         let dash = (angle * 12.0).sin() > 0.0;
                         if dash {
@@ -615,16 +613,7 @@ pub fn create_junction_texture(style: JunctionStyle) -> Image {
                     }
                 }
                 JunctionStyle::Continental => {
-                    // Pedestrian zebra crossings around perimeter: alternating white bars
-                    if dist >= 0.390 && dist <= 0.438 {
-                        let bar_phase = (angle * 28.0).sin();
-                        if bar_phase > 0.15 {
-                            let line_noise = (noise_fine - 0.5) * 15.0;
-                            r = (248.0 + line_noise).clamp(195.0, 255.0);
-                            g = (248.0 + line_noise).clamp(195.0, 255.0);
-                            b = (242.0 + line_noise).clamp(190.0, 255.0);
-                        }
-                    }
+                    // Clean central asphalt with aggregate and tire wear marks
                 }
             }
 
@@ -795,6 +784,7 @@ pub fn build_junction_mesh(
     junction: &Junction,
     waypoints: &[RoadWaypoint],
     heightmap: &HeightmapData,
+    style: JunctionStyle,
 ) -> Option<Mesh> {
     let k = junction.connected_arms.len();
     if k < 2 {
@@ -1003,6 +993,140 @@ pub fn build_junction_mesh(
             indices.push(d1);
             indices.push(s0);
             indices.push(s1);
+        }
+    }
+
+    // Road entrance markings (Zebra pedestrian crossings, stop bars, yield lines)
+    // placed exactly across each incoming road arm corridor
+    for i in 0..k {
+        let arm = &junction.connected_arms[i];
+        let (pt_arm_left, pt_arm_center, pt_arm_right) = arm_mouth_pts[i];
+        let d = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
+        let inward = -d;
+        let road_w = (pt_arm_right - pt_arm_left).length().max(2.0);
+
+        let calc_marking_pt = |s: f32, t: f32| -> Vec3 {
+            let pt_base = if t <= 0.5 {
+                let f = t * 2.0;
+                pt_arm_left * (1.0 - f) + pt_arm_center * f
+            } else {
+                let f = (t - 0.5) * 2.0;
+                pt_arm_center * (1.0 - f) + pt_arm_right * f
+            };
+            let blend = (s / r).clamp(0.0, 1.0);
+            let y_surface = pt_base.y * (1.0 - blend) + center_elev * blend;
+            Vec3::new(
+                pt_base.x + inward.x * s,
+                y_surface + 0.018,
+                pt_base.z + inward.z * s,
+            )
+        };
+
+        let mut add_marking_quad = |s0: f32, s1: f32, t0: f32, t1: f32| {
+            let c0 = calc_marking_pt(s0, t0);
+            let c1 = calc_marking_pt(s1, t0);
+            let c2 = calc_marking_pt(s1, t1);
+            let c3 = calc_marking_pt(s0, t1);
+
+            let base = positions.len() as u32;
+            positions.push([c0.x, c0.y, c0.z]);
+            positions.push([c1.x, c1.y, c1.z]);
+            positions.push([c2.x, c2.y, c2.z]);
+            positions.push([c3.x, c3.y, c3.z]);
+
+            normals.push([0.0, 1.0, 0.0]);
+            normals.push([0.0, 1.0, 0.0]);
+            normals.push([0.0, 1.0, 0.0]);
+            normals.push([0.0, 1.0, 0.0]);
+
+            uvs.push([0.015, 0.015]);
+            uvs.push([0.015, 0.015]);
+            uvs.push([0.015, 0.015]);
+            uvs.push([0.015, 0.015]);
+
+            colors.push([1.0, 1.0, 1.0, 1.0]);
+            colors.push([1.0, 1.0, 1.0, 1.0]);
+            colors.push([1.0, 1.0, 1.0, 1.0]);
+            colors.push([1.0, 1.0, 1.0, 1.0]);
+
+            // CCW winding so normal faces UP
+            indices.push(base);
+            indices.push(base + 1);
+            indices.push(base + 3);
+
+            indices.push(base + 1);
+            indices.push(base + 2);
+            indices.push(base + 3);
+        };
+
+        match style {
+            JunctionStyle::Continental => {
+                // Zebra pedestrian crossing across full road width
+                let margin = 0.40;
+                let stripe_w = 0.45;
+                let gap_w = 0.45;
+                let period = stripe_w + gap_w;
+                let avail_w = (road_w - 2.0 * margin).max(0.6);
+                let num_stripes = ((avail_w + gap_w) / period).floor() as usize;
+                let num_stripes = num_stripes.max(1);
+                let total_stripes_w = num_stripes as f32 * stripe_w + (num_stripes - 1) as f32 * gap_w;
+                let start_w = margin + (avail_w - total_stripes_w) * 0.5;
+
+                let crossing_len = (r * 0.35).clamp(2.4, 3.0);
+                let s0 = 0.4;
+                let s1 = s0 + crossing_len;
+
+                for s_idx in 0..num_stripes {
+                    let w0 = start_w + s_idx as f32 * period;
+                    let w1 = w0 + stripe_w;
+                    let t0 = (w0 / road_w).clamp(0.0, 1.0);
+                    let t1 = (w1 / road_w).clamp(0.0, 1.0);
+                    add_marking_quad(s0, s1, t0, t1);
+                }
+
+                // Solid white transverse stop bar across incoming traffic lane
+                let stop_s0 = (s1 + 0.45).min(r - 0.8);
+                let stop_s1 = (stop_s0 + 0.45).min(r - 0.35);
+                let (stop_t0, stop_t1) = if road_w > 5.0 {
+                    (0.52, 0.96)
+                } else {
+                    (0.15, 0.85)
+                };
+                if stop_s1 > stop_s0 {
+                    add_marking_quad(stop_s0, stop_s1, stop_t0, stop_t1);
+                }
+            }
+            JunctionStyle::BoxMarking => {
+                // Solid white stop bar across incoming traffic lane
+                let stop_s0: f32 = 0.5;
+                let stop_s1 = (stop_s0 + 0.45).min(r - 0.5);
+                let (stop_t0, stop_t1) = if road_w > 5.0 {
+                    (0.52, 0.96)
+                } else {
+                    (0.15, 0.85)
+                };
+                if stop_s1 > stop_s0 {
+                    add_marking_quad(stop_s0, stop_s1, stop_t0, stop_t1);
+                }
+            }
+            JunctionStyle::TurningCircle => {
+                // Dashed yield bar across incoming traffic lane
+                let (stop_t0, stop_t1) = if road_w > 5.0 {
+                    (0.52, 0.96)
+                } else {
+                    (0.15, 0.85)
+                };
+                let dash_len = (stop_t1 - stop_t0) / 5.0;
+                let stop_s0: f32 = 0.5;
+                let stop_s1 = (stop_s0 + 0.40).min(r - 0.5);
+                for d_i in 0..3 {
+                    let dt0 = stop_t0 + (d_i as f32 * 2.0) * dash_len;
+                    let dt1 = (dt0 + dash_len).min(stop_t1);
+                    if stop_s1 > stop_s0 {
+                        add_marking_quad(stop_s0, stop_s1, dt0, dt1);
+                    }
+                }
+            }
         }
     }
 
