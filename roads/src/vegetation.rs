@@ -3,6 +3,7 @@ use crate::spline::SplineSample;
 use crate::terrain::{HeightmapData, HALF_MAP, WATER_THRESHOLD};
 
 #[derive(Component)]
+#[require(Transform, Visibility)]
 pub struct VegetationMarker;
 
 /// Builds a realistic procedural conifer/deciduous-style pine tree mesh with trunk and needle canopy

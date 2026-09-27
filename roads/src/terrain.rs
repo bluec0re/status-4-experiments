@@ -3,6 +3,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::path::Path;
+use crate::camera::RtsCamera;
 
 pub const MAP_SIZE: f32 = 340.0;
 pub const HALF_MAP: f32 = MAP_SIZE * 0.5;
@@ -16,6 +17,21 @@ pub const TEX_WIDTH: u32 = 512;
 pub const TEX_HEIGHT: u32 = 512;
 pub const MIN_ALTITUDE: f32 = 1.0;
 pub const MAX_ALTITUDE: f32 = 24.0;
+
+#[derive(Component)]
+#[require(Transform, Visibility)]
+pub struct WaterMarker;
+
+pub struct TerrainPlugin;
+
+impl Plugin for TerrainPlugin {
+    fn build(&self, app: &mut App) {
+        let heightmap = HeightmapData::load_or_generate();
+        app.insert_resource(heightmap)
+            .add_systems(Startup, setup_environment)
+            .add_systems(Update, animate_water_system);
+    }
+}
 
 #[derive(Resource, Clone)]
 pub struct HeightmapData {
@@ -113,96 +129,88 @@ impl HeightmapData {
         h0 * (1.0 - tz) + h1 * tz
     }
 
-    /// Analytical central difference normal from heightmap texture
+    /// Surface normal vector calculated from finite differences
     pub fn sample_normal(&self, x: f32, z: f32) -> Vec3 {
-        let eps = 0.75;
+        let eps = 0.5;
         let h_l = self.sample(x - eps, z);
         let h_r = self.sample(x + eps, z);
         let h_d = self.sample(x, z - eps);
         let h_u = self.sample(x, z + eps);
 
-        Vec3::new(h_l - h_r, 2.0 * eps, h_d - h_u).normalize()
+        let dx = (h_r - h_l) / (2.0 * eps);
+        let dz = (h_u - h_d) / (2.0 * eps);
+
+        Vec3::new(-dx, 1.0, -dz).normalize()
     }
 
-    /// Raycast against the texture-backed terrain surface
-    pub fn raycast(&self, origin: Vec3, dir: Vec3) -> Option<Vec3> {
-        if dir.y >= 0.0 && origin.y > 60.0 {
-            return None;
-        }
+    /// Smooth sphere-traced raycast against the heightmap surface
+    pub fn raycast(&self, ray_origin: Vec3, ray_dir: Vec3) -> Option<Vec3> {
+        let mut t = 0.0f32;
+        let max_t = 600.0f32;
+        let step = 0.5f32;
 
-        let t_start = 0.0f32;
-        let t_end = 650.0f32;
-        let step = 1.4f32;
-        let mut t = t_start;
-        let mut prev_t = t;
-        let mut hit = false;
+        let mut prev_t = 0.0f32;
+        let mut prev_diff = ray_origin.y - self.sample(ray_origin.x, ray_origin.z);
 
-        while t < t_end {
-            let p = origin + dir * t;
-            if p.x.abs() <= HALF_MAP + 10.0 && p.z.abs() <= HALF_MAP + 10.0 {
-                let h = self.sample(p.x, p.z);
-                if p.y <= h {
-                    hit = true;
-                    break;
-                }
+        while t < max_t {
+            let p = ray_origin + ray_dir * t;
+            if p.x.abs() > HALF_MAP || p.z.abs() > HALF_MAP {
+                t += step;
+                continue;
             }
+
+            let ground_y = self.sample(p.x, p.z);
+            let diff = p.y - ground_y;
+
+            if diff <= 0.0 {
+                // Precise root finding via linear interpolation between previous and current step
+                let denom = prev_diff - diff;
+                let exact_t = if denom.abs() > 1e-4 {
+                    prev_t + (prev_diff / denom) * (t - prev_t)
+                } else {
+                    t
+                };
+                let hit_p = ray_origin + ray_dir * exact_t;
+                return Some(Vec3::new(hit_p.x, self.sample(hit_p.x, hit_p.z), hit_p.z));
+            }
+
             prev_t = t;
-            t += step;
+            prev_diff = diff;
+            let step_scale = (diff * 0.4).clamp(0.2, 3.0);
+            t += step * step_scale;
         }
 
-        if !hit {
-            return None;
-        }
-
-        // Binary search refinement
-        let mut lo = prev_t;
-        let mut hi = t;
-        for _ in 0..12 {
-            let mid = (lo + hi) * 0.5;
-            let p = origin + dir * mid;
-            let h = self.sample(p.x, p.z);
-            if p.y <= h {
-                hi = mid;
-            } else {
-                lo = mid;
-            }
-        }
-
-        let final_t = (lo + hi) * 0.5;
-        Some(origin + dir * final_t)
+        None
     }
 }
 
-// -------------------------------------------------------------------------------------------------
-// High quality, C^2 smooth procedural noise functions
-// Integer hashing ensures flawless continuity across negative coordinates in all quadrants!
-// -------------------------------------------------------------------------------------------------
-
-#[inline]
 fn hash2d(ix: i32, iy: i32) -> u32 {
-    let mut n = (ix as u32).wrapping_mul(0x9E3779B1) ^ (iy as u32).wrapping_mul(0x85EBCA6B);
-    n = (n ^ (n >> 15)).wrapping_mul(0xC2B2AE35);
-    n = (n ^ (n >> 13)).wrapping_mul(0x27D4EB2F);
-    n ^ (n >> 16)
+    let mut h = (ix as u32).wrapping_mul(374761393).wrapping_add((iy as u32).wrapping_mul(668265263));
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    h ^ (h >> 16)
 }
 
-#[inline]
 fn grad2d(ix: i32, iy: i32) -> Vec2 {
-    let h = hash2d(ix, iy);
-    let angle = (h & 0xFFFF) as f32 * (std::f32::consts::TAU / 65536.0);
-    Vec2::new(angle.cos(), angle.sin())
+    let h = hash2d(ix, iy) & 7;
+    match h {
+        0 => Vec2::new(1.0, 0.0),
+        1 => Vec2::new(-1.0, 0.0),
+        2 => Vec2::new(0.0, 1.0),
+        3 => Vec2::new(0.0, -1.0),
+        4 => Vec2::new(0.7071, 0.7071),
+        5 => Vec2::new(-0.7071, 0.7071),
+        6 => Vec2::new(0.7071, -0.7071),
+        _ => Vec2::new(-0.7071, -0.7071),
+    }
 }
 
-/// 2D Perlin gradient noise with quintic Hermite smoothing (C^2 continuous everywhere)
-pub fn perlin_noise(p: Vec2) -> f32 {
+fn perlin_noise(p: Vec2) -> f32 {
     let ix = p.x.floor() as i32;
     let iy = p.y.floor() as i32;
 
-    // Fractional offset strictly in [0.0, 1.0)
-    let fx = p.x - p.x.floor();
-    let fy = p.y - p.y.floor();
+    let fx = p.x - ix as f32;
+    let fy = p.y - iy as f32;
 
-    // Quintic polynomial: 6t^5 - 15t^4 + 10t^3
     let ux = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0);
     let uy = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0);
 
@@ -471,6 +479,106 @@ pub fn create_water_normal_texture() -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
     )
+}
+
+pub fn setup_environment(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    heightmap: Res<HeightmapData>,
+) {
+    // 1. Directional Sun Light (Realistic golden hour lighting with soft shadows)
+    commands.spawn((
+        DirectionalLight {
+            color: Color::srgb(1.0, 0.96, 0.88),
+            illuminance: 18_000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(
+            EulerRot::YXZ,
+            42.0f32.to_radians(),
+            -38.0f32.to_radians(),
+            0.0,
+        )),
+    ));
+
+    // 2. RTS 3D Camera with Ambient Lighting & Atmospheric Distance Fog
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 45.0, 60.0).looking_at(Vec3::new(0.0, 10.0, 0.0), Vec3::Y),
+        RtsCamera::default(),
+        AmbientLight {
+            color: Color::srgb(0.72, 0.82, 0.95),
+            brightness: 350.0,
+            ..default()
+        },
+        DistanceFog {
+            color: Color::srgba(0.72, 0.80, 0.90, 1.0),
+            falloff: FogFalloff::ExponentialSquared { density: 0.0035 },
+            ..default()
+        },
+    ));
+
+    // 3. Texture-Based Landscape Mesh & Material
+    let terrain_mesh = build_terrain_mesh(&heightmap);
+    let terrain_mesh_handle = meshes.add(terrain_mesh);
+
+    let terrain_normal_img = create_terrain_normal_texture(&heightmap);
+    let terrain_normal_handle = images.add(terrain_normal_img);
+
+    let terrain_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.88,
+        metallic: 0.02,
+        normal_map_texture: Some(terrain_normal_handle),
+        reflectance: 0.15,
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(terrain_mesh_handle),
+        MeshMaterial3d(terrain_mat),
+        Transform::default(),
+    ));
+
+    // 4. Realistic Water Body Plane for Terrain Below WATER_THRESHOLD
+    let water_mesh = build_water_mesh();
+    let water_mesh_handle = meshes.add(water_mesh);
+
+    let water_normal_img = create_water_normal_texture();
+    let water_normal_handle = images.add(water_normal_img);
+
+    let water_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.09, 0.26, 0.36, 0.84),
+        perceptual_roughness: 0.06,
+        metallic: 0.04,
+        reflectance: 0.65,
+        normal_map_texture: Some(water_normal_handle),
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(water_mesh_handle),
+        MeshMaterial3d(water_mat),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        WaterMarker,
+    ));
+}
+
+/// Subtle realistic river current / wave ripple animation
+pub fn animate_water_system(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<WaterMarker>>,
+) {
+    let t = time.elapsed_secs();
+    for mut transform in query.iter_mut() {
+        // Very subtle rhythmic breathing of the water surface
+        transform.translation.y = (t * 1.2).sin() * 0.035;
+    }
 }
 
 #[cfg(test)]

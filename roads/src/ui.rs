@@ -1,6 +1,23 @@
 use bevy::prelude::*;
-use crate::editor::{load_preset, EditorState, EditorTool};
+use crate::editor::{EditorAction, EditorSet, EditorState, EditorTool};
 use crate::terrain::{HeightmapData, WATER_THRESHOLD};
+
+pub struct UiPlugin;
+
+impl Plugin for UiPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_ui)
+            .add_systems(
+                Update,
+                (
+                    handle_button_clicks.in_set(EditorSet::Input),
+                    update_ui_system
+                        .in_set(EditorSet::PostUpdate)
+                        .run_if(resource_changed::<EditorState>),
+                ),
+            );
+    }
+}
 
 #[derive(Component)]
 pub struct StatsTextMarker;
@@ -282,7 +299,7 @@ pub fn setup_ui(mut commands: Commands) {
         });
 }
 
-/// Updates UI text with live road statistics and selected node details
+/// Updates UI text with live road statistics and selected node details (runs when EditorState changes)
 pub fn update_ui_system(
     state: Res<EditorState>,
     heightmap: Res<HeightmapData>,
@@ -361,10 +378,9 @@ pub fn update_ui_system(
     }
 }
 
-/// Handles UI button interactions
+/// Handles UI button interactions and emits decoupled EditorAction messages
 pub fn handle_button_clicks(
-    mut state: ResMut<EditorState>,
-    heightmap: Res<HeightmapData>,
+    mut action_writer: MessageWriter<EditorAction>,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, Option<&PresetBtnMarker>, Option<&ClearBtnMarker>, Option<&RideBtnMarker>, Option<&ToolBtnMarker>),
         (Changed<Interaction>, With<Button>),
@@ -375,24 +391,13 @@ pub fn handle_button_clicks(
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(Color::srgba(0.3, 0.4, 0.6, 0.95));
                 if let Some(p) = preset {
-                    load_preset(&mut state, p.0, &heightmap);
+                    action_writer.write(EditorAction::LoadPreset(p.0));
                 } else if clear.is_some() {
-                    state.waypoints.clear();
-                    state.selected_node = None;
-                    state.hovered_node = None;
-                    state.dirty = true;
+                    action_writer.write(EditorAction::ClearWaypoints);
                 } else if ride.is_some() {
-                    if !state.waypoints.is_empty() {
-                        state.ride_along = !state.ride_along;
-                        if state.ride_along {
-                            state.ride_dist = 0.0;
-                        }
-                    }
+                    action_writer.write(EditorAction::ToggleRideAlong);
                 } else if tool_btn.is_some() {
-                    state.tool = match state.tool {
-                        EditorTool::SelectMove => EditorTool::Add,
-                        EditorTool::Add => EditorTool::SelectMove,
-                    };
+                    action_writer.write(EditorAction::ToggleTool);
                 }
             }
             Interaction::Hovered => {

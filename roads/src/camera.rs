@@ -2,7 +2,16 @@ use bevy::prelude::*;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use crate::terrain::{HeightmapData, HALF_MAP};
 
+pub struct CameraPlugin;
+
+impl Plugin for CameraPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, update_rts_camera);
+    }
+}
+
 #[derive(Component)]
+#[require(Camera3d, Transform, Visibility)]
 pub struct RtsCamera {
     // Current smoothed state
     pub target: Vec3,

@@ -2,13 +2,69 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use crate::camera::RtsCamera;
 use crate::road::{
-    build_road_mesh, generate_bridge_pylons, generate_road_posts, RoadMeshMarker, RoadPylonMarker,
+    build_road_mesh, create_road_texture, generate_bridge_pylons, generate_road_posts,
+    RoadMeshMarker, RoadPylonMarker,
 };
 use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
 use crate::terrain::HeightmapData;
-use crate::vegetation::{compute_tree_positions, VegetationMarker};
+use crate::vegetation::{compute_tree_positions, create_pine_tree_mesh, VegetationMarker};
+
+/// Message type decoupling UI button clicks and hotkeys from editor state mutations
+#[derive(Message, Clone, Debug)]
+pub enum EditorAction {
+    LoadPreset(usize),
+    ClearWaypoints,
+    ToggleRideAlong,
+    ToggleTool,
+    AdjustRoadWidth(f32),
+    DeleteSelectedNode,
+    AdjustNodeElevation(f32),
+}
+
+/// System sets establishing strict ordering across input, action processing, mesh rebuilding, and post-update
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EditorSet {
+    Input,
+    ApplyActions,
+    MeshRebuild,
+    PostUpdate,
+}
+
+pub struct RoadEditorPlugin;
+
+impl Plugin for RoadEditorPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<EditorAction>()
+            .init_resource::<EditorState>()
+            .add_systems(Startup, setup_materials_and_assets)
+            .configure_sets(
+                Update,
+                (
+                    EditorSet::Input,
+                    EditorSet::ApplyActions.after(EditorSet::Input),
+                    EditorSet::MeshRebuild.after(EditorSet::ApplyActions),
+                    EditorSet::PostUpdate.after(EditorSet::MeshRebuild),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    handle_editor_input.in_set(EditorSet::Input),
+                    apply_editor_actions.in_set(EditorSet::ApplyActions),
+                    (
+                        update_road_mesh_system,
+                        update_vegetation_system,
+                        update_ride_along_camera,
+                    )
+                        .in_set(EditorSet::MeshRebuild),
+                    draw_editor_gizmos.in_set(EditorSet::PostUpdate),
+                ),
+            );
+    }
+}
 
 #[derive(Component)]
+#[require(Transform, Visibility)]
 pub struct RoadPostMarker;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -150,97 +206,62 @@ fn ray_sphere_intersect(ray_origin: Vec3, ray_dir: Vec3, sphere_center: Vec3, ra
     }
 }
 
-/// Handles editor inputs: selecting, dragging, adding, deleting, and tweaking waypoints
+/// Handles editor inputs: emits EditorAction messages and tracks mouse raycast dragging
 pub fn handle_editor_input(
     window: Single<&Window, With<PrimaryWindow>>,
     camera_query: Single<(&Camera, &GlobalTransform), With<RtsCamera>>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     heightmap: Res<HeightmapData>,
+    mut action_writer: MessageWriter<EditorAction>,
     mut state: ResMut<EditorState>,
 ) {
     let (camera, cam_gt) = *camera_query;
     let cursor_pos = window.cursor_position();
 
-    // Hotkeys for Presets
+    // Hotkeys dispatched as decoupled messages
     if keys.just_pressed(KeyCode::Digit1) {
-        load_preset(&mut state, 1, &heightmap);
+        action_writer.write(EditorAction::LoadPreset(1));
     } else if keys.just_pressed(KeyCode::Digit2) {
-        load_preset(&mut state, 2, &heightmap);
+        action_writer.write(EditorAction::LoadPreset(2));
     } else if keys.just_pressed(KeyCode::Digit3) {
-        load_preset(&mut state, 3, &heightmap);
+        action_writer.write(EditorAction::LoadPreset(3));
     } else if keys.just_pressed(KeyCode::KeyC) {
-        state.waypoints.clear();
-        state.selected_node = None;
-        state.hovered_node = None;
-        state.dirty = true;
+        action_writer.write(EditorAction::ClearWaypoints);
     }
 
     // Toggle Ride-along camera
     if keys.just_pressed(KeyCode::KeyF) {
-        if !state.waypoints.is_empty() {
-            state.ride_along = !state.ride_along;
-            if state.ride_along {
-                state.ride_dist = 0.0;
-            }
-        }
+        action_writer.write(EditorAction::ToggleRideAlong);
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        state.ride_along = false;
+    if keys.just_pressed(KeyCode::Escape) && state.ride_along {
+        action_writer.write(EditorAction::ToggleRideAlong);
     }
 
     // Road width adjustment
     if keys.just_pressed(KeyCode::BracketRight) {
-        state.road_width = (state.road_width + 0.8).min(16.0);
-        let w = state.road_width;
-        for wp in state.waypoints.iter_mut() {
-            wp.width = w;
-        }
-        state.dirty = true;
+        action_writer.write(EditorAction::AdjustRoadWidth(0.8));
     }
     if keys.just_pressed(KeyCode::BracketLeft) {
-        state.road_width = (state.road_width - 0.8).max(3.5);
-        let w = state.road_width;
-        for wp in state.waypoints.iter_mut() {
-            wp.width = w;
-        }
-        state.dirty = true;
+        action_writer.write(EditorAction::AdjustRoadWidth(-0.8));
     }
 
     // Tool switching
     if keys.just_pressed(KeyCode::KeyT) {
-        state.tool = match state.tool {
-            EditorTool::SelectMove => EditorTool::Add,
-            EditorTool::Add => EditorTool::SelectMove,
-        };
+        action_writer.write(EditorAction::ToggleTool);
     }
 
     // Elevation adjustment for selected node (R = up, V = down)
-    if let Some(sel) = state.selected_node {
-        if sel < state.waypoints.len() {
-            if keys.pressed(KeyCode::KeyR) {
-                state.waypoints[sel].pos.y += 0.15;
-                state.dirty = true;
-            }
-            if keys.pressed(KeyCode::KeyV) {
-                let ground_y = heightmap.sample(state.waypoints[sel].pos.x, state.waypoints[sel].pos.z);
-                state.waypoints[sel].pos.y = (state.waypoints[sel].pos.y - 0.15).max(ground_y + 0.08);
-                state.dirty = true;
-            }
-        }
+    if keys.pressed(KeyCode::KeyR) {
+        action_writer.write(EditorAction::AdjustNodeElevation(0.15));
+    }
+    if keys.pressed(KeyCode::KeyV) {
+        action_writer.write(EditorAction::AdjustNodeElevation(-0.15));
     }
 
     // Delete selected node
     if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || keys.just_pressed(KeyCode::KeyX) {
-        if let Some(sel) = state.selected_node {
-            if sel < state.waypoints.len() {
-                state.waypoints.remove(sel);
-                state.selected_node = None;
-                state.hovered_node = None;
-                state.is_dragging = false;
-                state.dirty = true;
-            }
-        }
+        action_writer.write(EditorAction::DeleteSelectedNode);
     }
 
     let Some(c_pos) = cursor_pos else { return; };
@@ -311,6 +332,70 @@ pub fn handle_editor_input(
     }
 }
 
+/// Applies decoupled EditorAction messages to EditorState
+pub fn apply_editor_actions(
+    mut actions: MessageReader<EditorAction>,
+    mut state: ResMut<EditorState>,
+    heightmap: Res<HeightmapData>,
+) {
+    for action in actions.read() {
+        match action {
+            EditorAction::LoadPreset(idx) => {
+                load_preset(&mut state, *idx, &heightmap);
+            }
+            EditorAction::ClearWaypoints => {
+                state.waypoints.clear();
+                state.selected_node = None;
+                state.hovered_node = None;
+                state.is_dragging = false;
+                state.dirty = true;
+            }
+            EditorAction::ToggleRideAlong => {
+                if !state.waypoints.is_empty() {
+                    state.ride_along = !state.ride_along;
+                    if state.ride_along {
+                        state.ride_dist = 0.0;
+                    }
+                }
+            }
+            EditorAction::ToggleTool => {
+                state.tool = match state.tool {
+                    EditorTool::SelectMove => EditorTool::Add,
+                    EditorTool::Add => EditorTool::SelectMove,
+                };
+            }
+            EditorAction::AdjustRoadWidth(delta) => {
+                state.road_width = (state.road_width + delta).clamp(3.5, 16.0);
+                let w = state.road_width;
+                for wp in state.waypoints.iter_mut() {
+                    wp.width = w;
+                }
+                state.dirty = true;
+            }
+            EditorAction::DeleteSelectedNode => {
+                if let Some(sel) = state.selected_node {
+                    if sel < state.waypoints.len() {
+                        state.waypoints.remove(sel);
+                        state.selected_node = None;
+                        state.hovered_node = None;
+                        state.is_dragging = false;
+                        state.dirty = true;
+                    }
+                }
+            }
+            EditorAction::AdjustNodeElevation(delta) => {
+                if let Some(sel) = state.selected_node {
+                    if sel < state.waypoints.len() {
+                        let ground_y = heightmap.sample(state.waypoints[sel].pos.x, state.waypoints[sel].pos.z);
+                        state.waypoints[sel].pos.y = (state.waypoints[sel].pos.y + delta).max(ground_y + 0.08);
+                        state.dirty = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Updates spline samples and rebuilds road mesh & bridge pylons whenever dirty
 pub fn update_road_mesh_system(
     mut commands: Commands,
@@ -368,29 +453,29 @@ pub fn update_road_mesh_system(
         RoadMeshMarker,
     ));
 
-    // 4. Spawn bridge pylons
+    // 4. Batch spawn bridge pylons
     let pylons = generate_bridge_pylons(&samples, &heightmap);
     let cylinder_proto = meshes.add(Cylinder::new(1.1, 1.0));
+    let pylon_mat = pylon_material.0.clone();
 
-    for (pos, height) in pylons {
-        commands.spawn((
-            Mesh3d(cylinder_proto.clone()),
-            MeshMaterial3d(pylon_material.0.clone()),
-            Transform::from_translation(pos).with_scale(Vec3::new(1.0, height, 1.0)),
-            RoadPylonMarker,
-        ));
-    }
+    commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| (
+        Mesh3d(cylinder_proto.clone()),
+        MeshMaterial3d(pylon_mat.clone()),
+        Transform::from_translation(pos).with_scale(Vec3::new(1.0, height, 1.0)),
+        RoadPylonMarker,
+    )));
 
-    // 5. Spawn roadside delineator posts
+    // 5. Batch spawn roadside delineator posts
     let posts = generate_road_posts(&samples);
-    for (pos, rot) in posts {
-        commands.spawn((
-            Mesh3d(post_mesh.0.clone()),
-            MeshMaterial3d(post_material.0.clone()),
-            Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
-            RoadPostMarker,
-        ));
-    }
+    let p_mesh = post_mesh.0.clone();
+    let p_mat = post_material.0.clone();
+
+    commands.spawn_batch(posts.into_iter().map(move |(pos, rot)| (
+        Mesh3d(p_mesh.clone()),
+        MeshMaterial3d(p_mat.clone()),
+        Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
+        RoadPostMarker,
+    )));
 }
 
 /// Updates tree clearing around road when road is modified
@@ -412,14 +497,15 @@ pub fn update_vegetation_system(
         }
 
         let tree_positions = compute_tree_positions(&state.samples, &heightmap);
-        for (pos, scale) in tree_positions {
-            commands.spawn((
-                Mesh3d(tree_mesh_handle.0.clone()),
-                MeshMaterial3d(tree_mat_handle.0.clone()),
-                Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
-                VegetationMarker,
-            ));
-        }
+        let t_mesh = tree_mesh_handle.0.clone();
+        let t_mat = tree_mat_handle.0.clone();
+
+        commands.spawn_batch(tree_positions.into_iter().map(move |(pos, scale)| (
+            Mesh3d(t_mesh.clone()),
+            MeshMaterial3d(t_mat.clone()),
+            Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
+            VegetationMarker,
+        )));
     }
 }
 
@@ -489,6 +575,66 @@ pub fn draw_editor_gizmos(
 
         gizmos.circle(Isometry3d::new(ground_pt + Vec3::Y * 0.05, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), radius * 1.5, col);
     }
+}
+
+pub fn setup_materials_and_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    heightmap: Res<HeightmapData>,
+    mut editor_state: ResMut<EditorState>,
+) {
+    // 1. Road PBR Material with custom procedural asphalt & marking texture
+    let road_img = create_road_texture();
+    let road_img_handle = images.add(road_img);
+
+    let road_mat_handle = materials.add(StandardMaterial {
+        base_color_texture: Some(road_img_handle),
+        perceptual_roughness: 0.78,
+        metallic: 0.0,
+        reflectance: 0.2,
+        cull_mode: None, // Double-sided rendering so embankment skirts look solid
+        ..default()
+    });
+    commands.insert_resource(RoadMaterialHandle(road_mat_handle));
+
+    // 2. Concrete Bridge Pylon Material
+    let pylon_mat_handle = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.68, 0.67, 0.65),
+        perceptual_roughness: 0.85,
+        metallic: 0.05,
+        ..default()
+    });
+    commands.insert_resource(PylonMaterialHandle(pylon_mat_handle));
+
+    // 3. Pine Tree Asset & Material
+    let pine_mesh = create_pine_tree_mesh();
+    let pine_mesh_handle = meshes.add(pine_mesh);
+    commands.insert_resource(TreeMeshHandle(pine_mesh_handle));
+
+    let tree_mat_handle = materials.add(StandardMaterial {
+        base_color: Color::WHITE, // Vertex colors supply the trunk and needle colors
+        perceptual_roughness: 0.9,
+        metallic: 0.0,
+        ..default()
+    });
+    commands.insert_resource(TreeMaterialHandle(tree_mat_handle));
+
+    // 4. Roadside Delineator Post Mesh & Material
+    let post_mesh_handle = meshes.add(Cuboid::new(0.12, 0.9, 0.12));
+    commands.insert_resource(PostMeshHandle(post_mesh_handle));
+
+    let post_mat_handle = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.92, 0.92, 0.90),
+        perceptual_roughness: 0.4,
+        metallic: 0.1,
+        ..default()
+    });
+    commands.insert_resource(PostMaterialHandle(post_mat_handle));
+
+    // 5. Load initial scenic road preset
+    load_preset(&mut editor_state, 1, &heightmap);
 }
 
 #[derive(Resource)]

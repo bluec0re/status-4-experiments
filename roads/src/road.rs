@@ -6,9 +6,11 @@ use crate::spline::SplineSample;
 use crate::terrain::HeightmapData;
 
 #[derive(Component)]
+#[require(Transform, Visibility)]
 pub struct RoadMeshMarker;
 
 #[derive(Component)]
+#[require(Transform, Visibility)]
 pub struct RoadPylonMarker;
 
 /// Builds the 3D road ribbon mesh along the spline samples,
