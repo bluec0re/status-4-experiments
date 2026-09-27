@@ -1,9 +1,10 @@
 use crate::camera::RtsCamera;
 use crate::road::{
-    RoadMeshMarker, RoadPylonMarker, build_road_mesh, create_road_texture, generate_bridge_pylons,
-    generate_road_posts,
+    build_junction_mesh, build_road_mesh, create_junction_texture, create_road_texture,
+    detect_junctions, generate_bridge_pylons, generate_road_posts_filtered,
+    split_street_samples, JunctionStyle, RoadMeshMarker, RoadPylonMarker, Street,
 };
-use crate::spline::{RoadWaypoint, SplineSample, sample_spline};
+use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
 use crate::terrain::HeightmapData;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -20,6 +21,10 @@ pub enum EditorAction {
     ToggleWidthMode,
     DeleteSelectedNode,
     AdjustNodeElevation(f32),
+    NewStreet,
+    JoinStreets,
+    CycleActiveStreet,
+    CycleJunctionStyle,
 }
 
 /// System sets establishing strict ordering across input, action processing, mesh rebuilding, and post-update
@@ -85,8 +90,12 @@ pub enum LaneSetting {
 #[derive(Resource)]
 pub struct EditorState {
     pub waypoints: Vec<RoadWaypoint>,
+    pub streets: Vec<Street>,
+    pub active_street_idx: usize,
+
     pub selected_node: Option<usize>,
     pub hovered_node: Option<usize>,
+    pub snap_target_node: Option<usize>,
     pub is_dragging: bool,
     pub tool: EditorTool,
 
@@ -100,6 +109,8 @@ pub struct EditorState {
     pub total_length: f32,
     pub max_grade: f32,
     pub samples: Vec<SplineSample>,
+    pub junctions_count: usize,
+    pub junction_style: JunctionStyle,
 
     // Dynamic Tree Avoidance Tracking
     pub road_version: usize,
@@ -127,14 +138,27 @@ impl EditorState {
             }
         }
     }
+
+    #[allow(dead_code)]
+    pub fn active_street(&self) -> Option<&Street> {
+        self.streets.get(self.active_street_idx)
+    }
+
+    #[allow(dead_code)]
+    pub fn active_street_mut(&mut self) -> Option<&mut Street> {
+        self.streets.get_mut(self.active_street_idx)
+    }
 }
 
 impl Default for EditorState {
     fn default() -> Self {
         Self {
             waypoints: Vec::new(),
+            streets: vec![Street::new(1, "Main Street", 8.0, 2)],
+            active_street_idx: 0,
             selected_node: None,
             hovered_node: None,
+            snap_target_node: None,
             is_dragging: false,
             tool: EditorTool::SelectMove,
 
@@ -147,6 +171,8 @@ impl Default for EditorState {
             total_length: 0.0,
             max_grade: 0.0,
             samples: Vec::new(),
+            junctions_count: 0,
+            junction_style: JunctionStyle::default(),
 
             road_version: 0,
             displaced_trees_count: 0,
@@ -161,8 +187,11 @@ impl Default for EditorState {
 
 pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &HeightmapData) {
     state.waypoints.clear();
+    state.streets.clear();
+    state.active_street_idx = 0;
     state.selected_node = None;
     state.hovered_node = None;
+    state.snap_target_node = None;
     state.is_dragging = false;
 
     match preset_index {
@@ -184,6 +213,13 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                     .waypoints
                     .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
+            state.streets.push(Street {
+                id: 1,
+                name: "Main Boulevard".to_string(),
+                node_indices: (0..pts.len()).collect(),
+                road_width: 8.0,
+                lanes: 2,
+            });
         }
         2 => {
             // River Crossing Expressway & Elevated Bridge - 4 Lanes (15.0m)
@@ -207,6 +243,13 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                     .waypoints
                     .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
+            state.streets.push(Street {
+                id: 1,
+                name: "River Expressway".to_string(),
+                node_indices: (0..pts.len()).collect(),
+                road_width: 15.0,
+                lanes: 4,
+            });
         }
         3 => {
             // Suburban Ring Road & Plateau Climb - 2 Lanes (8.0m)
@@ -227,6 +270,98 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                     .waypoints
                     .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
+            state.streets.push(Street {
+                id: 1,
+                name: "Suburban Loop".to_string(),
+                node_indices: (0..pts.len()).collect(),
+                road_width: 8.0,
+                lanes: 2,
+            });
+        }
+        4 => {
+            // Town Center & Junctions (3 Joined Streets: 4-Way Crossroads & 3-Way T-Junction)
+            state.road_width = 8.0;
+            state.lane_setting = LaneSetting::Fixed(2);
+
+            // Street 1 (Main Avenue, 15m, 4 lanes): East-West corridor
+            let main_pts = [
+                Vec3::new(-105.0, 0.0, -10.0), // 0
+                Vec3::new(-45.0, 0.0, -10.0),  // 1 (T-Junction with Street 3)
+                Vec3::new(10.0, 0.0, -10.0),   // 2 (4-way Crossroads with Street 2)
+                Vec3::new(65.0, 0.0, -10.0),   // 3
+                Vec3::new(115.0, 0.0, -10.0),  // 4
+            ];
+            for p in main_pts {
+                let y = heightmap.sample(p.x, p.z) + state.height_offset;
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), 15.0));
+            }
+
+            // Street 2 (North-South Cross Street, 8m, 2 lanes):
+            // Intersects Main Avenue at node 2
+            let north_pts = [
+                Vec3::new(10.0, 0.0, -85.0),  // 5
+                Vec3::new(10.0, 0.0, -45.0),  // 6
+            ];
+            for p in north_pts {
+                let y = heightmap.sample(p.x, p.z) + state.height_offset;
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), 8.0));
+            }
+            let south_pts = [
+                Vec3::new(10.0, 0.0, 30.0),   // 7
+                Vec3::new(10.0, 0.0, 80.0),   // 8
+            ];
+            for p in south_pts {
+                let y = heightmap.sample(p.x, p.z) + state.height_offset;
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), 8.0));
+            }
+
+            // Street 3 (Hillside Spur / T-junction, 8m, 2 lanes):
+            // Branches from node 1 northward
+            let spur_pts = [
+                Vec3::new(-45.0, 0.0, 35.0),  // 9
+                Vec3::new(-65.0, 0.0, 75.0),  // 10
+            ];
+            for p in spur_pts {
+                let y = heightmap.sample(p.x, p.z) + state.height_offset;
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), 8.0));
+            }
+
+            // Setup streets and connections:
+            state.streets.push(Street {
+                id: 1,
+                name: "Main Avenue".to_string(),
+                node_indices: vec![0, 1, 2, 3, 4],
+                road_width: 15.0,
+                lanes: 4,
+            });
+
+            // Street 2 connects through node 2 (Crossroads!):
+            state.streets.push(Street {
+                id: 2,
+                name: "Cross Street".to_string(),
+                node_indices: vec![5, 6, 2, 7, 8],
+                road_width: 8.0,
+                lanes: 2,
+            });
+
+            // Street 3 branches from node 1 (T-Junction!):
+            state.streets.push(Street {
+                id: 3,
+                name: "Hillside Spur".to_string(),
+                node_indices: vec![1, 9, 10],
+                road_width: 8.0,
+                lanes: 2,
+            });
+
+            state.active_street_idx = 0;
         }
         _ => {}
     }
@@ -282,8 +417,18 @@ pub fn handle_editor_input(
         action_writer.write(EditorAction::LoadPreset(2));
     } else if keys.just_pressed(KeyCode::Digit3) {
         action_writer.write(EditorAction::LoadPreset(3));
+    } else if keys.just_pressed(KeyCode::Digit4) {
+        action_writer.write(EditorAction::LoadPreset(4));
     } else if keys.just_pressed(KeyCode::KeyC) {
         action_writer.write(EditorAction::ClearWaypoints);
+    } else if keys.just_pressed(KeyCode::KeyN) {
+        action_writer.write(EditorAction::NewStreet);
+    } else if keys.just_pressed(KeyCode::KeyJ) {
+        action_writer.write(EditorAction::JoinStreets);
+    } else if keys.just_pressed(KeyCode::Tab) {
+        action_writer.write(EditorAction::CycleActiveStreet);
+    } else if keys.just_pressed(KeyCode::KeyK) {
+        action_writer.write(EditorAction::CycleJunctionStyle);
     }
 
     // Toggle Ride-along camera
@@ -338,7 +483,7 @@ pub fn handle_editor_input(
     // Find hovered waypoint sphere
     let mut closest_wp = None;
     let mut closest_dist = f32::MAX;
-    let node_radius = 2.2f32;
+    let node_radius = 2.4f32;
 
     for (i, wp) in state.waypoints.iter().enumerate() {
         if let Some(t) = ray_sphere_intersect(ray.origin, ray.direction.into(), wp.pos, node_radius)
@@ -354,30 +499,67 @@ pub fn handle_editor_input(
     // Mouse Press / Drag / Release logic
     if mouse_button.just_pressed(MouseButton::Left) {
         if let Some(hovered) = state.hovered_node {
-            state.selected_node = Some(hovered);
-            state.is_dragging = true;
-        } else {
-            // Clicked on empty terrain
-            if let Some(terrain_pt) = heightmap.raycast(ray.origin, ray.direction.into()) {
-                if state.tool == EditorTool::Add {
-                    // Append new waypoint
-                    let pt = terrain_pt + Vec3::Y * state.height_offset;
-                    let width = state.road_width;
-                    state.waypoints.push(RoadWaypoint::new(pt, width));
-                    let new_idx = state.waypoints.len() - 1;
-                    state.selected_node = Some(new_idx);
-                    state.is_dragging = true;
+            if state.tool == EditorTool::Add {
+                // JOIN OR BRANCH!
+                if state.streets.is_empty() {
+                    let rw = state.road_width;
+                    let el = state.effective_lanes();
+                    state.streets.push(Street::new(1, "Main Street", rw, el));
+                    state.active_street_idx = 0;
+                }
+
+                let active_idx = state.active_street_idx;
+                if state.streets[active_idx].node_indices.is_empty() {
+                    // Branch from this existing node into a new street
+                    state.streets[active_idx].node_indices.push(hovered);
+                    state.selected_node = Some(hovered);
                     state.dirty = true;
-                } else {
-                    // Deselect
-                    state.selected_node = None;
+                } else if state.streets[active_idx].node_indices.last() != Some(&hovered) {
+                    // Join active street to this existing node -> creates a junction!
+                    state.streets[active_idx].node_indices.push(hovered);
+                    state.selected_node = Some(hovered);
+                    state.dirty = true;
+                }
+            } else {
+                state.selected_node = Some(hovered);
+                state.is_dragging = true;
+                // Switch active street to whichever street contains this node
+                let found_street = state.streets.iter().enumerate().find_map(|(s_idx, s)| {
+                    if s.node_indices.contains(&hovered) {
+                        Some((s_idx, s.road_width, s.lanes))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((s_idx, rw, lanes)) = found_street {
+                    state.active_street_idx = s_idx;
+                    state.road_width = rw;
+                    state.lane_setting = LaneSetting::Fixed(lanes);
                 }
             }
-        }
-    }
+        } else if let Some(terrain_pt) = heightmap.raycast(ray.origin, ray.direction.into()) {
+            // Clicked on empty terrain
+            if state.tool == EditorTool::Add {
+                let pt = terrain_pt + Vec3::Y * state.height_offset;
+                let width = state.road_width;
+                state.waypoints.push(RoadWaypoint::new(pt, width));
+                let new_idx = state.waypoints.len() - 1;
 
-    if mouse_button.just_released(MouseButton::Left) {
-        state.is_dragging = false;
+                if state.streets.is_empty() {
+                    let rw = state.road_width;
+                    let el = state.effective_lanes();
+                    state.streets.push(Street::new(1, "Main Street", rw, el));
+                    state.active_street_idx = 0;
+                }
+                let active_idx = state.active_street_idx;
+                state.streets[active_idx].node_indices.push(new_idx);
+                state.selected_node = Some(new_idx);
+                state.is_dragging = true;
+                state.dirty = true;
+            } else {
+                state.selected_node = None;
+            }
+        }
     }
 
     // Dragging selected waypoint
@@ -396,6 +578,55 @@ pub fn handle_editor_input(
 
         state.waypoints[sel].pos = Vec3::new(terrain_pt.x, y, terrain_pt.z);
         state.dirty = true;
+
+        // Check magnetic snap to other nearby waypoints (for join-on-drop)
+        let mut snap_cand = None;
+        let snap_threshold = 3.6f32;
+        for (i, wp) in state.waypoints.iter().enumerate() {
+            if i != sel && wp.pos.distance(state.waypoints[sel].pos) < snap_threshold {
+                snap_cand = Some(i);
+                break;
+            }
+        }
+        state.snap_target_node = snap_cand;
+    }
+
+    if mouse_button.just_released(MouseButton::Left) {
+        state.is_dragging = false;
+
+        // If dropped near another node with snap target, merge & join into a junction!
+        if let Some(sel) = state.selected_node
+            && let Some(target) = state.snap_target_node
+            && sel != target
+            && sel < state.waypoints.len()
+            && target < state.waypoints.len()
+        {
+            // Replace references to sel with target across all streets
+            for s in state.streets.iter_mut() {
+                for idx in s.node_indices.iter_mut() {
+                    if *idx == sel {
+                        *idx = target;
+                    }
+                }
+                s.node_indices.dedup();
+            }
+
+            // Remove sel from state.waypoints
+            state.waypoints.remove(sel);
+            for s in state.streets.iter_mut() {
+                for idx in s.node_indices.iter_mut() {
+                    if *idx > sel {
+                        *idx -= 1;
+                    }
+                }
+            }
+            let new_sel = if target > sel { target - 1 } else { target };
+            state.selected_node = Some(new_sel);
+            state.snap_target_node = None;
+            state.dirty = true;
+        } else {
+            state.snap_target_node = None;
+        }
     }
 }
 
@@ -412,9 +643,75 @@ pub fn apply_editor_actions(
             }
             EditorAction::ClearWaypoints => {
                 state.waypoints.clear();
+                state.streets.clear();
+                let rw = state.road_width;
+                let el = state.effective_lanes();
+                state.streets.push(Street::new(1, "Main Street", rw, el));
+                state.active_street_idx = 0;
                 state.selected_node = None;
                 state.hovered_node = None;
+                state.snap_target_node = None;
                 state.is_dragging = false;
+                state.dirty = true;
+            }
+            EditorAction::NewStreet => {
+                let next_id = state.streets.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+                let rw = state.road_width;
+                let el = state.effective_lanes();
+                let new_street = Street {
+                    id: next_id,
+                    name: format!("Street {}", next_id),
+                    node_indices: Vec::new(),
+                    road_width: rw,
+                    lanes: el,
+                };
+                state.streets.push(new_street);
+                state.active_street_idx = state.streets.len() - 1;
+                state.tool = EditorTool::Add;
+                state.dirty = true;
+            }
+            EditorAction::CycleActiveStreet => {
+                if !state.streets.is_empty() {
+                    state.active_street_idx = (state.active_street_idx + 1) % state.streets.len();
+                    state.road_width = state.streets[state.active_street_idx].road_width;
+                    state.lane_setting = LaneSetting::Fixed(state.streets[state.active_street_idx].lanes);
+                    if let Some(&first_node) = state.streets[state.active_street_idx].node_indices.first() {
+                        state.selected_node = Some(first_node);
+                    }
+                    state.dirty = true;
+                }
+            }
+            EditorAction::JoinStreets => {
+                if let Some(sel) = state.selected_node
+                    && sel < state.waypoints.len()
+                {
+                    let sel_pos = state.waypoints[sel].pos;
+                    let mut best_target = None;
+                    let mut best_dist = 25.0f32;
+
+                    for (i, wp) in state.waypoints.iter().enumerate() {
+                        if i == sel {
+                            continue;
+                        }
+                        let d = sel_pos.distance(wp.pos);
+                        if d < best_dist {
+                            best_dist = d;
+                            best_target = Some(i);
+                        }
+                    }
+
+                    if let Some(target) = best_target
+                        && state.active_street_idx < state.streets.len()
+                        && !state.streets[state.active_street_idx].node_indices.contains(&target)
+                    {
+                        let active_idx = state.active_street_idx;
+                        state.streets[active_idx].node_indices.push(target);
+                        state.dirty = true;
+                    }
+                }
+            }
+            EditorAction::CycleJunctionStyle => {
+                state.junction_style = state.junction_style.next();
                 state.dirty = true;
             }
             EditorAction::ToggleRideAlong => {
@@ -440,9 +737,16 @@ pub fn apply_editor_actions(
                 };
                 state.road_width = target_width;
                 state.lane_setting = LaneSetting::Fixed(*lanes);
-                let w = state.road_width;
-                for wp in state.waypoints.iter_mut() {
-                    wp.width = w;
+                let active_idx = state.active_street_idx;
+                if active_idx < state.streets.len() {
+                    state.streets[active_idx].road_width = target_width;
+                    state.streets[active_idx].lanes = *lanes;
+                    let node_indices = state.streets[active_idx].node_indices.clone();
+                    for idx in node_indices {
+                        if idx < state.waypoints.len() {
+                            state.waypoints[idx].width = target_width;
+                        }
+                    }
                 }
                 state.dirty = true;
             }
@@ -463,8 +767,16 @@ pub fn apply_editor_actions(
                         _ => 8.0,
                     };
                     let w = state.road_width;
-                    for wp in state.waypoints.iter_mut() {
-                        wp.width = w;
+                    let active_idx = state.active_street_idx;
+                    if active_idx < state.streets.len() {
+                        state.streets[active_idx].road_width = w;
+                        state.streets[active_idx].lanes = l;
+                        let node_indices = state.streets[active_idx].node_indices.clone();
+                        for idx in node_indices {
+                            if idx < state.waypoints.len() {
+                                state.waypoints[idx].width = w;
+                            }
+                        }
                     }
                 }
                 state.dirty = true;
@@ -501,8 +813,17 @@ pub fn apply_editor_actions(
                     }
                 }
                 let w = state.road_width;
-                for wp in state.waypoints.iter_mut() {
-                    wp.width = w;
+                let l = state.effective_lanes();
+                let active_idx = state.active_street_idx;
+                if active_idx < state.streets.len() {
+                    state.streets[active_idx].road_width = w;
+                    state.streets[active_idx].lanes = l;
+                    let node_indices = state.streets[active_idx].node_indices.clone();
+                    for idx in node_indices {
+                        if idx < state.waypoints.len() {
+                            state.waypoints[idx].width = w;
+                        }
+                    }
                 }
                 state.dirty = true;
             }
@@ -511,8 +832,24 @@ pub fn apply_editor_actions(
                     && sel < state.waypoints.len()
                 {
                     state.waypoints.remove(sel);
+                    for s in state.streets.iter_mut() {
+                        s.node_indices.retain(|&idx| idx != sel);
+                        for idx in s.node_indices.iter_mut() {
+                            if *idx > sel {
+                                *idx -= 1;
+                            }
+                        }
+                    }
+                    state.streets.retain(|s| !s.node_indices.is_empty());
+                    if state.streets.is_empty() {
+                        let rw = state.road_width;
+                        let el = state.effective_lanes();
+                        state.streets.push(Street::new(1, "Main Street", rw, el));
+                    }
+                    state.active_street_idx = state.active_street_idx.min(state.streets.len() - 1);
                     state.selected_node = None;
                     state.hovered_node = None;
+                    state.snap_target_node = None;
                     state.is_dragging = false;
                     state.dirty = true;
                 }
@@ -540,6 +877,8 @@ pub fn update_road_mesh_system(
     mut images: ResMut<Assets<Image>>,
     road_material: Res<RoadMaterialHandle>,
     road_texture_handle: Res<RoadTextureImageHandle>,
+    junction_material: Res<JunctionMaterialHandle>,
+    junction_texture_handle: Res<JunctionTextureImageHandle>,
     pylon_material: Res<PylonMaterialHandle>,
     post_mesh: Res<PostMeshHandle>,
     post_material: Res<PostMaterialHandle>,
@@ -553,26 +892,15 @@ pub fn update_road_mesh_system(
     }
     state.dirty = false;
 
-    // 0. Update road texture in-place to adjust to road width and lanes
+    // 0. Update road and junction textures in-place to adjust to road width, lanes, and junction style
     if let Some(mut img) = images.get_mut(&road_texture_handle.0) {
         *img = create_road_texture(state.road_width, state.effective_lanes());
     }
-
-    // 1. Recompute spline samples with terrain clearance
-    let samples = sample_spline(&state.waypoints, 0.8, &heightmap);
-    state.total_length = samples.last().map(|s| s.distance).unwrap_or(0.0);
-
-    let mut max_gr = 0.0f32;
-    for s in samples.iter() {
-        if s.grade.abs() > max_gr {
-            max_gr = s.grade.abs();
-        }
+    if let Some(mut img) = images.get_mut(&junction_texture_handle.0) {
+        *img = create_junction_texture(state.junction_style);
     }
-    state.max_grade = max_gr;
-    state.samples = samples.clone();
-    state.road_version = state.road_version.wrapping_add(1);
 
-    // 2. Clear old road mesh, pylons, and roadside posts
+    // 1. Clear old road mesh, pylons, and roadside posts
     for ent in road_query.iter() {
         commands.entity(ent).despawn();
     }
@@ -583,52 +911,112 @@ pub fn update_road_mesh_system(
         commands.entity(ent).despawn();
     }
 
-    if samples.len() < 2 {
-        return;
-    }
+    // 2. Detect junctions across all streets and waypoints
+    let mut junctions = detect_junctions(&state.waypoints, &state.streets);
+    state.junctions_count = junctions.len();
 
-    // 3. Spawn new road mesh conformed to heightmap
-    let road_mesh = build_road_mesh(&samples, &heightmap);
-    let mesh_handle = meshes.add(road_mesh);
+    let mut all_samples: Vec<SplineSample> = Vec::new();
+    let mut total_len = 0.0f32;
+    let mut max_gr = 0.0f32;
 
-    commands.spawn((
-        Mesh3d(mesh_handle),
-        MeshMaterial3d(road_material.0.clone()),
-        RoadMeshMarker,
-    ));
-
-    // 4. Batch spawn bridge pylons (scaled to road width)
-    let pylons = generate_bridge_pylons(&samples, &heightmap);
     let cylinder_proto = meshes.add(Cylinder::new(1.1, 1.0));
     let pylon_mat = pylon_material.0.clone();
-    let pylon_radius = (state.road_width * 0.10).clamp(0.9, 2.2);
-
-    commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| {
-        (
-            Mesh3d(cylinder_proto.clone()),
-            MeshMaterial3d(pylon_mat.clone()),
-            Transform::from_translation(pos).with_scale(Vec3::new(
-                pylon_radius,
-                height,
-                pylon_radius,
-            )),
-            RoadPylonMarker,
-        )
-    }));
-
-    // 5. Batch spawn roadside delineator posts
-    let posts = generate_road_posts(&samples);
     let p_mesh = post_mesh.0.clone();
     let p_mat = post_material.0.clone();
 
-    commands.spawn_batch(posts.into_iter().map(move |(pos, rot)| {
-        (
-            Mesh3d(p_mesh.clone()),
-            MeshMaterial3d(p_mat.clone()),
-            Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
-            RoadPostMarker,
-        )
-    }));
+    // 3. Build road ribbon meshes and posts for each street
+    for (street_idx, street) in state.streets.iter().enumerate() {
+        if street.node_indices.len() < 2 {
+            continue;
+        }
+
+        let street_wps: Vec<RoadWaypoint> = street
+            .node_indices
+            .iter()
+            .filter_map(|&idx| state.waypoints.get(idx).copied())
+            .collect();
+
+        if street_wps.len() < 2 {
+            continue;
+        }
+
+        let samples = sample_spline(&street_wps, 0.8, &heightmap);
+        if samples.len() < 2 {
+            continue;
+        }
+
+        total_len += samples.last().map(|s| s.distance).unwrap_or(0.0);
+        for s in samples.iter() {
+            if s.grade.abs() > max_gr {
+                max_gr = s.grade.abs();
+            }
+        }
+
+        // Split road spline into segments outside junctions and attach boundary mouth samples to junctions
+        let segments = split_street_samples(street_idx, &samples, &mut junctions);
+        for segment in segments {
+            let road_mesh = build_road_mesh(&segment, &heightmap);
+            let mesh_handle = meshes.add(road_mesh);
+
+            commands.spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(road_material.0.clone()),
+                RoadMeshMarker,
+            ));
+        }
+
+        // Batch spawn bridge pylons (scaled to street width)
+        let pylons = generate_bridge_pylons(&samples, &heightmap);
+        let pylon_radius = (street.road_width * 0.10).clamp(0.9, 2.2);
+
+        let cyl_clone = cylinder_proto.clone();
+        let p_mat_clone = pylon_mat.clone();
+        commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| {
+            (
+                Mesh3d(cyl_clone.clone()),
+                MeshMaterial3d(p_mat_clone.clone()),
+                Transform::from_translation(pos).with_scale(Vec3::new(
+                    pylon_radius,
+                    height,
+                    pylon_radius,
+                )),
+                RoadPylonMarker,
+            )
+        }));
+
+        // Batch spawn roadside posts, filtering out posts inside junctions
+        let posts = generate_road_posts_filtered(&samples, &junctions);
+        let post_mesh_clone = p_mesh.clone();
+        let post_mat_clone = p_mat.clone();
+
+        commands.spawn_batch(posts.into_iter().map(move |(pos, rot)| {
+            (
+                Mesh3d(post_mesh_clone.clone()),
+                MeshMaterial3d(post_mat_clone.clone()),
+                Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
+                RoadPostMarker,
+            )
+        }));
+
+        all_samples.extend(samples);
+    }
+
+    // 4. Build junction intersection meshes with dedicated junction material
+    for junction in &junctions {
+        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap) {
+            let j_handle = meshes.add(j_mesh);
+            commands.spawn((
+                Mesh3d(j_handle),
+                MeshMaterial3d(junction_material.0.clone()),
+                RoadMeshMarker,
+            ));
+        }
+    }
+
+    state.total_length = total_len;
+    state.max_grade = max_gr;
+    state.samples = all_samples;
+    state.road_version = state.road_version.wrapping_add(1);
 }
 
 /// Handles the Ride-Along camera mode (F key)
@@ -679,14 +1067,82 @@ pub fn draw_editor_gizmos(
         return;
     }
 
+    let junctions = detect_junctions(&state.waypoints, &state.streets);
+    let junction_node_indices: Vec<usize> = junctions.iter().map(|j| j.node_idx).collect();
+
+    // 1. Draw street connection lines between waypoints
+    for (s_idx, street) in state.streets.iter().enumerate() {
+        let is_active = s_idx == state.active_street_idx;
+        let line_col = if is_active {
+            Color::srgba(0.2, 0.9, 1.0, 0.7)
+        } else {
+            Color::srgba(0.5, 0.6, 0.8, 0.4)
+        };
+
+        for window in street.node_indices.windows(2) {
+            if let (Some(a), Some(b)) = (state.waypoints.get(window[0]), state.waypoints.get(window[1])) {
+                gizmos.line(a.pos + Vec3::Y * 0.1, b.pos + Vec3::Y * 0.1, line_col);
+            }
+        }
+    }
+
+    // 2. Draw junction boundary indicators and spokes
+    for junction in &junctions {
+        let ground_y = heightmap.sample(junction.pos.x, junction.pos.z);
+        let center = Vec3::new(junction.pos.x, junction.pos.y.max(ground_y + 0.1), junction.pos.z);
+
+        // Golden amber junction circle
+        gizmos.circle(
+            Isometry3d::new(
+                center + Vec3::Y * 0.06,
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            ),
+            junction.radius,
+            Color::srgb(1.0, 0.75, 0.15),
+        );
+
+        // Spokes pointing toward each connecting road arm
+        for arm in &junction.connected_arms {
+            let arm_dir = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
+            let spoke_end = center + arm_dir * junction.radius;
+            gizmos.line(center + Vec3::Y * 0.06, spoke_end + Vec3::Y * 0.06, Color::srgba(1.0, 0.8, 0.2, 0.7));
+        }
+    }
+
+    // 3. Draw magnetic snap indicator if dragging near a snap target
+    if let Some(sel) = state.selected_node
+        && let Some(target) = state.snap_target_node
+        && let (Some(sel_wp), Some(target_wp)) = (state.waypoints.get(sel), state.waypoints.get(target))
+    {
+        // Magnetic line connecting dragged node to snap target
+        gizmos.line(
+            sel_wp.pos,
+            target_wp.pos,
+            Color::srgb(0.2, 1.0, 0.4),
+        );
+        // Snap target pulsing ring
+        gizmos.circle(
+            Isometry3d::new(
+                target_wp.pos + Vec3::Y * 0.1,
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            ),
+            3.6,
+            Color::srgb(0.2, 1.0, 0.4),
+        );
+    }
+
+    // 4. Draw waypoint spheres and ground drop lines
     for (i, wp) in state.waypoints.iter().enumerate() {
         let is_selected = state.selected_node == Some(i);
         let is_hovered = state.hovered_node == Some(i);
+        let is_junction = junction_node_indices.contains(&i);
 
         let (col, radius) = if is_selected {
             (Color::srgb(1.0, 0.25, 0.1), 1.6)
         } else if is_hovered {
             (Color::srgb(1.0, 0.85, 0.2), 1.4)
+        } else if is_junction {
+            (Color::srgb(1.0, 0.70, 0.15), 1.3)
         } else {
             (Color::srgb(0.2, 0.85, 1.0), 1.1)
         };
@@ -742,6 +1198,22 @@ pub fn setup_materials_and_assets(
     });
     commands.insert_resource(RoadMaterialHandle(road_mat_handle));
 
+    // 1b. Dedicated Junction PBR Material with procedural intersection markings and turning scrub
+    let initial_junc_style = editor_state.junction_style;
+    let junc_img = create_junction_texture(initial_junc_style);
+    let junc_img_handle = images.add(junc_img);
+    commands.insert_resource(JunctionTextureImageHandle(junc_img_handle.clone()));
+
+    let junc_mat_handle = materials.add(StandardMaterial {
+        base_color_texture: Some(junc_img_handle),
+        perceptual_roughness: 0.72,
+        metallic: 0.0,
+        reflectance: 0.22,
+        cull_mode: None, // Double-sided rendering so embankment skirts look solid
+        ..default()
+    });
+    commands.insert_resource(JunctionMaterialHandle(junc_mat_handle));
+
     // 2. Concrete Bridge Pylon Material
     let pylon_mat_handle = materials.add(StandardMaterial {
         base_color: Color::srgb(0.68, 0.67, 0.65),
@@ -772,6 +1244,12 @@ pub struct RoadTextureImageHandle(pub Handle<Image>);
 
 #[derive(Resource)]
 pub struct RoadMaterialHandle(pub Handle<StandardMaterial>);
+
+#[derive(Resource, Clone)]
+pub struct JunctionTextureImageHandle(pub Handle<Image>);
+
+#[derive(Resource)]
+pub struct JunctionMaterialHandle(pub Handle<StandardMaterial>);
 
 #[derive(Resource)]
 pub struct PylonMaterialHandle(pub Handle<StandardMaterial>);
