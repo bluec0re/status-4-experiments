@@ -1,10 +1,10 @@
 use crate::camera::RtsCamera;
 use crate::road::{
+    JunctionElevationMode, JunctionStyle, RoadMeshMarker, RoadPylonMarker, Street,
     build_junction_mesh, build_road_mesh, create_junction_texture, create_road_texture,
-    detect_junctions, generate_bridge_pylons, generate_road_posts_filtered,
-    split_street_samples, JunctionElevationMode, JunctionStyle, RoadMeshMarker, RoadPylonMarker, Street,
+    detect_junctions, generate_bridge_pylons, generate_road_posts_filtered, split_street_samples,
 };
-use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
+use crate::spline::{RoadWaypoint, SplineSample, sample_spline};
 use crate::terrain::HeightmapData;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -304,8 +304,8 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             // Street 2 (North-South Cross Street, 8m, 2 lanes):
             // Intersects Main Avenue at node 2
             let north_pts = [
-                Vec3::new(10.0, 0.0, -85.0),  // 5
-                Vec3::new(10.0, 0.0, -45.0),  // 6
+                Vec3::new(10.0, 0.0, -85.0), // 5
+                Vec3::new(10.0, 0.0, -45.0), // 6
             ];
             for p in north_pts {
                 let y = heightmap.sample(p.x, p.z) + state.height_offset;
@@ -314,8 +314,8 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                     .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), 8.0));
             }
             let south_pts = [
-                Vec3::new(10.0, 0.0, 30.0),   // 7
-                Vec3::new(10.0, 0.0, 80.0),   // 8
+                Vec3::new(10.0, 0.0, 30.0), // 7
+                Vec3::new(10.0, 0.0, 80.0), // 8
             ];
             for p in south_pts {
                 let y = heightmap.sample(p.x, p.z) + state.height_offset;
@@ -327,8 +327,8 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             // Street 3 (Hillside Spur / T-junction, 8m, 2 lanes):
             // Branches from node 1 northward
             let spur_pts = [
-                Vec3::new(-45.0, 0.0, 35.0),  // 9
-                Vec3::new(-65.0, 0.0, 75.0),  // 10
+                Vec3::new(-45.0, 0.0, 35.0), // 9
+                Vec3::new(-65.0, 0.0, 75.0), // 10
             ];
             for p in spur_pts {
                 let y = heightmap.sample(p.x, p.z) + state.height_offset;
@@ -679,8 +679,11 @@ pub fn apply_editor_actions(
                 if !state.streets.is_empty() {
                     state.active_street_idx = (state.active_street_idx + 1) % state.streets.len();
                     state.road_width = state.streets[state.active_street_idx].road_width;
-                    state.lane_setting = LaneSetting::Fixed(state.streets[state.active_street_idx].lanes);
-                    if let Some(&first_node) = state.streets[state.active_street_idx].node_indices.first() {
+                    state.lane_setting =
+                        LaneSetting::Fixed(state.streets[state.active_street_idx].lanes);
+                    if let Some(&first_node) =
+                        state.streets[state.active_street_idx].node_indices.first()
+                    {
                         state.selected_node = Some(first_node);
                     }
                     state.dirty = true;
@@ -707,7 +710,9 @@ pub fn apply_editor_actions(
 
                     if let Some(target) = best_target
                         && state.active_street_idx < state.streets.len()
-                        && !state.streets[state.active_street_idx].node_indices.contains(&target)
+                        && !state.streets[state.active_street_idx]
+                            .node_indices
+                            .contains(&target)
                     {
                         let active_idx = state.active_street_idx;
                         state.streets[active_idx].node_indices.push(target);
@@ -962,7 +967,12 @@ pub fn update_road_mesh_system(
         }
 
         // Split road spline into segments outside junctions and attach boundary mouth samples to junctions
-        let segments = split_street_samples(street_idx, &samples, &mut junctions, state.junction_elevation_mode);
+        let segments = split_street_samples(
+            street_idx,
+            &samples,
+            &mut junctions,
+            state.junction_elevation_mode,
+        );
         for segment in segments {
             let road_mesh = build_road_mesh(&segment, &heightmap);
             let mesh_handle = meshes.add(road_mesh);
@@ -1012,7 +1022,13 @@ pub fn update_road_mesh_system(
 
     // 4. Build junction intersection meshes with dedicated junction material
     for junction in &junctions {
-        if let Some(j_mesh) = build_junction_mesh(junction, &state.waypoints, &heightmap, state.junction_style, state.junction_elevation_mode) {
+        if let Some(j_mesh) = build_junction_mesh(
+            junction,
+            &state.waypoints,
+            &heightmap,
+            state.junction_style,
+            state.junction_elevation_mode,
+        ) {
             let j_handle = meshes.add(j_mesh);
             commands.spawn((
                 Mesh3d(j_handle),
@@ -1089,7 +1105,10 @@ pub fn draw_editor_gizmos(
         };
 
         for window in street.node_indices.windows(2) {
-            if let (Some(a), Some(b)) = (state.waypoints.get(window[0]), state.waypoints.get(window[1])) {
+            if let (Some(a), Some(b)) = (
+                state.waypoints.get(window[0]),
+                state.waypoints.get(window[1]),
+            ) {
                 gizmos.line(a.pos + Vec3::Y * 0.1, b.pos + Vec3::Y * 0.1, line_col);
             }
         }
@@ -1098,7 +1117,11 @@ pub fn draw_editor_gizmos(
     // 2. Draw junction boundary indicators and spokes
     for junction in &junctions {
         let ground_y = heightmap.sample(junction.pos.x, junction.pos.z);
-        let center = Vec3::new(junction.pos.x, junction.pos.y.max(ground_y + 0.1), junction.pos.z);
+        let center = Vec3::new(
+            junction.pos.x,
+            junction.pos.y.max(ground_y + 0.1),
+            junction.pos.z,
+        );
 
         // Golden amber junction circle
         gizmos.circle(
@@ -1114,21 +1137,22 @@ pub fn draw_editor_gizmos(
         for arm in &junction.connected_arms {
             let arm_dir = Vec3::new(arm.dir.x, 0.0, arm.dir.z).normalize_or_zero();
             let spoke_end = center + arm_dir * junction.radius;
-            gizmos.line(center + Vec3::Y * 0.06, spoke_end + Vec3::Y * 0.06, Color::srgba(1.0, 0.8, 0.2, 0.7));
+            gizmos.line(
+                center + Vec3::Y * 0.06,
+                spoke_end + Vec3::Y * 0.06,
+                Color::srgba(1.0, 0.8, 0.2, 0.7),
+            );
         }
     }
 
     // 3. Draw magnetic snap indicator if dragging near a snap target
     if let Some(sel) = state.selected_node
         && let Some(target) = state.snap_target_node
-        && let (Some(sel_wp), Some(target_wp)) = (state.waypoints.get(sel), state.waypoints.get(target))
+        && let (Some(sel_wp), Some(target_wp)) =
+            (state.waypoints.get(sel), state.waypoints.get(target))
     {
         // Magnetic line connecting dragged node to snap target
-        gizmos.line(
-            sel_wp.pos,
-            target_wp.pos,
-            Color::srgb(0.2, 1.0, 0.4),
-        );
+        gizmos.line(sel_wp.pos, target_wp.pos, Color::srgb(0.2, 1.0, 0.4));
         // Snap target pulsing ring
         gizmos.circle(
             Isometry3d::new(
