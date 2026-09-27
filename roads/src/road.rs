@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::spline::SplineSample;
@@ -205,6 +206,7 @@ pub fn create_road_texture() -> Image {
 
     for y in 0..height {
         let v = y as f32 / height as f32;
+        // Seamless periodic repeat of dashes along V (exactly 4 complete cycles per texture height)
         let is_dash_white = (v * 4.0).fract() < 0.55;
 
         for x in 0..width {
@@ -250,7 +252,7 @@ pub fn create_road_texture() -> Image {
         }
     }
 
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width,
             height,
@@ -260,5 +262,15 @@ pub fn create_road_texture() -> Image {
         data,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
-    )
+    );
+
+    // CRITICAL: Set sampler addressing to Repeat so texture tiles seamlessly along the spline V axis!
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..default()
+    });
+
+    image
 }

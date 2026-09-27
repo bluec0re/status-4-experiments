@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::path::Path;
@@ -382,7 +383,7 @@ pub fn create_terrain_normal_texture(heightmap: &HeightmapData) -> Image {
         }
     }
 
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width: size,
             height: size,
@@ -392,7 +393,16 @@ pub fn create_terrain_normal_texture(heightmap: &HeightmapData) -> Image {
         data,
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
-    )
+    );
+
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..default()
+    });
+
+    image
 }
 
 /// Builds the water plane mesh at WATER_THRESHOLD
@@ -468,7 +478,7 @@ pub fn create_water_normal_texture() -> Image {
         }
     }
 
-    Image::new(
+    let mut image = Image::new(
         Extent3d {
             width: size,
             height: size,
@@ -478,7 +488,16 @@ pub fn create_water_normal_texture() -> Image {
         data,
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
-    )
+    );
+
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..default()
+    });
+
+    image
 }
 
 pub fn setup_environment(
