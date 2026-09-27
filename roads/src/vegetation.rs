@@ -103,7 +103,6 @@ pub fn create_pine_tree_mesh() -> Mesh {
 pub fn compute_tree_positions(road_samples: &[SplineSample], heightmap: &HeightmapData) -> Vec<(Vec3, f32)> {
     let mut trees = Vec::new();
     let step = 8.0;
-    let clearance_sq = 9.0 * 9.0;
 
     let mut x = -HALF_MAP + 20.0;
     while x <= HALF_MAP - 20.0 {
@@ -128,8 +127,9 @@ pub fn compute_tree_positions(road_samples: &[SplineSample], heightmap: &Heightm
                 if norm.y > 0.88 && dist_to_river > 15.0 && y > (WATER_THRESHOLD + 0.9) {
                     let mut too_close_to_road = false;
                     for s in road_samples.iter() {
+                        let min_clearance = s.width * 0.5 + 4.5;
                         let d2 = (s.pos.x - tx) * (s.pos.x - tx) + (s.pos.z - tz) * (s.pos.z - tz);
-                        if d2 < clearance_sq {
+                        if d2 < (min_clearance * min_clearance) {
                             too_close_to_road = true;
                             break;
                         }

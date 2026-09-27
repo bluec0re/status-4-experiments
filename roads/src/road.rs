@@ -25,9 +25,9 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
     // 0: Left underground skirt anchor (buried -0.8m into terrain)
     // 1: Left surface embankment verge
     // 2: Left gravel shoulder
-    // 3: Left asphalt edge
-    // 4: Center crown
-    // 5: Right asphalt edge
+    // 3: Left asphalt edge (u = 0.15)
+    // 4: Center crown (u = 0.50)
+    // 5: Right asphalt edge (u = 0.85)
     // 6: Right gravel shoulder
     // 7: Right surface embankment verge
     // 8: Right underground skirt anchor (buried -0.8m into terrain)
@@ -63,13 +63,13 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
             // Elevated viaduct bridge profile with safety parapets/railings
             [
                 (-(half_w + 0.4), -1.2, 0.0,  [0.35, 0.35, 0.38, 1.0]), // Bridge bottom-left
-                (-(half_w + 0.4), -0.6, 0.02, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-left
-                (-(half_w + 0.3),  0.4, 0.05, [0.72, 0.72, 0.76, 1.0]), // Railing top-left
-                (-half_w,          0.0, 0.12, [0.35, 0.35, 0.38, 1.0]), // Deck road left
+                (-(half_w + 0.4), -0.6, 0.04, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-left
+                (-(half_w + 0.3),  0.4, 0.08, [0.72, 0.72, 0.76, 1.0]), // Railing top-left
+                (-half_w,          0.0, 0.15, [0.35, 0.35, 0.38, 1.0]), // Deck road left
                 ( 0.0,             0.04, 0.5, [0.35, 0.35, 0.38, 1.0]), // Crown center
-                ( half_w,          0.0, 0.88, [0.35, 0.35, 0.38, 1.0]), // Deck road right
-                ( half_w + 0.3,    0.4, 0.95, [0.72, 0.72, 0.76, 1.0]), // Railing top-right
-                ( half_w + 0.4,   -0.6, 0.98, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-right
+                ( half_w,          0.0, 0.85, [0.35, 0.35, 0.38, 1.0]), // Deck road right
+                ( half_w + 0.3,    0.4, 0.92, [0.72, 0.72, 0.76, 1.0]), // Railing top-right
+                ( half_w + 0.4,   -0.6, 0.96, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-right
                 ( half_w + 0.4,   -1.2, 1.0,  [0.35, 0.35, 0.38, 1.0]), // Bridge bottom-right
             ]
         } else {
@@ -175,7 +175,7 @@ pub fn generate_bridge_pylons(samples: &[SplineSample], heightmap: &HeightmapDat
     pylons
 }
 
-/// Generates roadside delineators / reflectors along sharp curves
+/// Generates roadside delineators / reflectors along curves and edges
 pub fn generate_road_posts(samples: &[SplineSample]) -> Vec<(Vec3, Quat)> {
     let mut posts = Vec::new();
     let step = 10.0;
@@ -198,16 +198,33 @@ pub fn generate_road_posts(samples: &[SplineSample]) -> Vec<(Vec3, Quat)> {
     posts
 }
 
-/// Generates realistic procedural PBR road asphalt texture with lane stripes
-pub fn create_road_texture() -> Image {
+/// Generates realistic procedural PBR road asphalt texture with markings adapted to road width and lanes
+pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
     let width = 512;
     let height = 512;
     let mut data = Vec::with_capacity((width * height * 4) as usize);
 
+    let rw = road_width.max(3.0);
+    let effective_lanes = match lanes {
+        1 => 1,
+        2 => 2,
+        4 => 4,
+        _ => {
+            if rw < 5.8 {
+                1
+            } else if rw < 11.2 {
+                2
+            } else {
+                4
+            }
+        }
+    };
+
     for y in 0..height {
         let v = y as f32 / height as f32;
-        // Seamless periodic repeat of dashes along V (exactly 4 complete cycles per texture height)
-        let is_dash_white = (v * 4.0).fract() < 0.55;
+        // Seamless periodic repeat of dashes along V (4 complete cycles per texture height)
+        let dash_phase = (v * 4.0).fract();
+        let is_dash = dash_phase < 0.55;
 
         for x in 0..width {
             let u = x as f32 / width as f32;
@@ -217,32 +234,102 @@ pub fn create_road_texture() -> Image {
             let mut g = 42.0 + noise_val * 14.0;
             let mut b = 45.0 + noise_val * 14.0;
 
-            // Left & Right solid edge lines
-            if (u >= 0.15 && u <= 0.175) || (u >= 0.825 && u <= 0.85) {
-                let edge_noise = (noise_val - 0.5) * 20.0;
-                r = (220.0 + edge_noise).clamp(160.0, 245.0);
-                g = (220.0 + edge_noise).clamp(160.0, 245.0);
-                b = (215.0 + edge_noise).clamp(160.0, 240.0);
-            }
-            // Center dashed line
-            else if u >= 0.485 && u <= 0.515 && is_dash_white {
-                let line_noise = (noise_val - 0.5) * 15.0;
-                r = (240.0 + line_noise).clamp(180.0, 255.0);
-                g = (205.0 + line_noise).clamp(160.0, 230.0);
-                b = (40.0 + line_noise).clamp(30.0, 80.0);
-            }
-            // Wheel tracks subtle darkening
-            else if (u >= 0.25 && u <= 0.40) || (u >= 0.60 && u <= 0.75) {
-                r *= 0.86;
-                g *= 0.86;
-                b *= 0.88;
-            }
-            // Shoulders gravel
-            else if u < 0.15 || u > 0.85 {
+            if u < 0.15 || u > 0.85 {
+                // Shoulders gravel
                 let gravel_noise = (((x * 67 + y * 43) * 73) & 0x3F) as f32 / 63.0;
                 r = 85.0 + gravel_noise * 30.0;
                 g = 80.0 + gravel_noise * 25.0;
                 b = 70.0 + gravel_noise * 25.0;
+            } else {
+                // Asphalt road surface
+                let u_road = (u - 0.15) / 0.70;
+                let x_m = u_road * rw;
+
+                // 1. Solid white outer edge lines (16cm wide, inset 6cm from asphalt edge)
+                let is_left_edge = x_m >= 0.06 && x_m <= 0.22;
+                let is_right_edge = x_m >= (rw - 0.22) && x_m <= (rw - 0.06);
+
+                if is_left_edge || is_right_edge {
+                    let edge_noise = (noise_val - 0.5) * 20.0;
+                    r = (235.0 + edge_noise).clamp(180.0, 255.0);
+                    g = (235.0 + edge_noise).clamp(180.0, 255.0);
+                    b = (230.0 + edge_noise).clamp(175.0, 250.0);
+                } else {
+                    let mut is_line_painted = false;
+                    let mut in_wheel_track = false;
+
+                    match effective_lanes {
+                        1 => {
+                            // Single lane road: No center line.
+                            // Wheel tracks for single vehicle centered in lane
+                            let center = rw * 0.5;
+                            if (x_m - (center - 0.85)).abs() < 0.26 || (x_m - (center + 0.85)).abs() < 0.26 {
+                                in_wheel_track = true;
+                            }
+                        }
+                        2 => {
+                            // Two lanes: Center dashed line
+                            let center = rw * 0.5;
+                            if (x_m - center).abs() <= 0.08 && is_dash {
+                                let line_noise = (noise_val - 0.5) * 15.0;
+                                r = (242.0 + line_noise).clamp(180.0, 255.0);
+                                g = (205.0 + line_noise).clamp(160.0, 230.0);
+                                b = (40.0 + line_noise).clamp(30.0, 80.0);
+                                is_line_painted = true;
+                            }
+
+                            // Two sets of wheel tracks
+                            let lane1_c = rw * 0.25;
+                            let lane2_c = rw * 0.75;
+                            if (x_m - (lane1_c - 0.80)).abs() < 0.24 || (x_m - (lane1_c + 0.80)).abs() < 0.24
+                                || (x_m - (lane2_c - 0.80)).abs() < 0.24 || (x_m - (lane2_c + 0.80)).abs() < 0.24 {
+                                in_wheel_track = true;
+                            }
+                        }
+                        4 => {
+                            // Four lanes: Double yellow center line + dashed white lane dividers
+                            let center = rw * 0.5;
+                            // Center double yellow line:
+                            let is_yellow1 = x_m >= (center - 0.24) && x_m <= (center - 0.08);
+                            let is_yellow2 = x_m >= (center + 0.08) && x_m <= (center + 0.24);
+
+                            if is_yellow1 || is_yellow2 {
+                                let line_noise = (noise_val - 0.5) * 15.0;
+                                r = (245.0 + line_noise).clamp(190.0, 255.0);
+                                g = (200.0 + line_noise).clamp(150.0, 225.0);
+                                b = (35.0 + line_noise).clamp(20.0, 70.0);
+                                is_line_painted = true;
+                            } else {
+                                // Dashed white lane dividers at 1/4 and 3/4
+                                let div1 = rw * 0.25;
+                                let div2 = rw * 0.75;
+                                if ((x_m - div1).abs() <= 0.075 || (x_m - div2).abs() <= 0.075) && is_dash {
+                                    let line_noise = (noise_val - 0.5) * 15.0;
+                                    r = (235.0 + line_noise).clamp(180.0, 255.0);
+                                    g = (235.0 + line_noise).clamp(180.0, 255.0);
+                                    b = (230.0 + line_noise).clamp(175.0, 250.0);
+                                    is_line_painted = true;
+                                }
+                            }
+
+                            // Four sets of wheel tracks
+                            let centers = [rw * 0.125, rw * 0.375, rw * 0.625, rw * 0.875];
+                            for lc in centers {
+                                if (x_m - (lc - 0.75)).abs() < 0.22 || (x_m - (lc + 0.75)).abs() < 0.22 {
+                                    in_wheel_track = true;
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    if !is_line_painted && in_wheel_track {
+                        r *= 0.86;
+                        g *= 0.86;
+                        b *= 0.88;
+                    }
+                }
             }
 
             data.push(r as u8);
@@ -264,7 +351,7 @@ pub fn create_road_texture() -> Image {
         RenderAssetUsages::default(),
     );
 
-    // CRITICAL: Set sampler addressing to Repeat so texture tiles seamlessly along the spline V axis!
+    // Set sampler addressing to Repeat so texture tiles seamlessly along spline V axis
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::ClampToEdge,
         address_mode_v: ImageAddressMode::Repeat,
@@ -273,4 +360,19 @@ pub fn create_road_texture() -> Image {
     });
 
     image
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_road_texture_lanes() {
+        for &(width, lanes) in &[(4.0, 1), (8.0, 2), (15.0, 4), (6.5, 0)] {
+            let img = create_road_texture(width, lanes);
+            assert_eq!(img.texture_descriptor.size.width, 512);
+            assert_eq!(img.texture_descriptor.size.height, 512);
+            assert_eq!(img.data.as_ref().unwrap().len(), 512 * 512 * 4);
+        }
+    }
 }

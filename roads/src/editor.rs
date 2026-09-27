@@ -17,6 +17,8 @@ pub enum EditorAction {
     ToggleRideAlong,
     ToggleTool,
     AdjustRoadWidth(f32),
+    SetLanes(usize),
+    ToggleWidthMode,
     DeleteSelectedNode,
     AdjustNodeElevation(f32),
 }
@@ -73,6 +75,18 @@ pub enum EditorTool {
     SelectMove,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WidthMode {
+    Lanes,
+    Seamless,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LaneSetting {
+    Auto,
+    Fixed(usize),
+}
+
 #[derive(Resource)]
 pub struct EditorState {
     pub waypoints: Vec<RoadWaypoint>,
@@ -82,6 +96,8 @@ pub struct EditorState {
     pub tool: EditorTool,
 
     pub road_width: f32,
+    pub width_mode: WidthMode,
+    pub lane_setting: LaneSetting,
     pub height_offset: f32,
     pub dirty: bool,
 
@@ -96,6 +112,23 @@ pub struct EditorState {
     pub ride_speed: f32,
 }
 
+impl EditorState {
+    pub fn effective_lanes(&self) -> usize {
+        match self.lane_setting {
+            LaneSetting::Fixed(l) => l,
+            LaneSetting::Auto => {
+                if self.road_width < 5.8 {
+                    1
+                } else if self.road_width < 11.2 {
+                    2
+                } else {
+                    4
+                }
+            }
+        }
+    }
+}
+
 impl Default for EditorState {
     fn default() -> Self {
         Self {
@@ -106,6 +139,8 @@ impl Default for EditorState {
             tool: EditorTool::SelectMove,
 
             road_width: 8.0,
+            width_mode: WidthMode::Lanes,
+            lane_setting: LaneSetting::Fixed(2),
             height_offset: 0.18,
             dirty: true,
 
@@ -128,7 +163,9 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
 
     match preset_index {
         1 => {
-            // Main Town Boulevard
+            // Main Town Boulevard - 2 Lanes (8.0m)
+            state.road_width = 8.0;
+            state.lane_setting = LaneSetting::Fixed(2);
             let pts = [
                 Vec3::new(-110.0, 0.0, -60.0),
                 Vec3::new(-60.0,  0.0, -30.0),
@@ -143,7 +180,9 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             }
         }
         2 => {
-            // River Crossing Expressway & Elevated Bridge
+            // River Crossing Expressway & Elevated Bridge - 4 Lanes (15.0m)
+            state.road_width = 15.0;
+            state.lane_setting = LaneSetting::Fixed(4);
             let pts = [
                 Vec3::new(-100.0, 0.0,  45.0),
                 Vec3::new(-50.0,  0.0,  20.0),
@@ -158,11 +197,13 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                 } else if i == 1 || i == 3 {
                     y = y.max(12.0);
                 }
-                state.waypoints.push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width + 1.2));
+                state.waypoints.push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
         }
         3 => {
-            // Suburban Ring Road & Plateau Climb
+            // Suburban Ring Road & Plateau Climb - 2 Lanes (8.0m)
+            state.road_width = 8.0;
+            state.lane_setting = LaneSetting::Fixed(2);
             let pts = [
                 Vec3::new(-80.0, 0.0,  70.0),
                 Vec3::new(-30.0, 0.0,  85.0),
@@ -238,12 +279,17 @@ pub fn handle_editor_input(
         action_writer.write(EditorAction::ToggleRideAlong);
     }
 
-    // Road width adjustment
+    // Road width adjustment: [ decreases, ] increases
     if keys.just_pressed(KeyCode::BracketRight) {
-        action_writer.write(EditorAction::AdjustRoadWidth(0.8));
+        action_writer.write(EditorAction::AdjustRoadWidth(0.5));
     }
     if keys.just_pressed(KeyCode::BracketLeft) {
-        action_writer.write(EditorAction::AdjustRoadWidth(-0.8));
+        action_writer.write(EditorAction::AdjustRoadWidth(-0.5));
+    }
+
+    // Toggle Width Mode: Lanes vs Seamless (L key)
+    if keys.just_pressed(KeyCode::KeyL) {
+        action_writer.write(EditorAction::ToggleWidthMode);
     }
 
     // Tool switching
@@ -364,8 +410,75 @@ pub fn apply_editor_actions(
                     EditorTool::Add => EditorTool::SelectMove,
                 };
             }
+            EditorAction::SetLanes(lanes) => {
+                let target_width = match lanes {
+                    1 => 4.0,
+                    2 => 8.0,
+                    4 => 15.0,
+                    _ => 8.0,
+                };
+                state.road_width = target_width;
+                state.lane_setting = LaneSetting::Fixed(*lanes);
+                let w = state.road_width;
+                for wp in state.waypoints.iter_mut() {
+                    wp.width = w;
+                }
+                state.dirty = true;
+            }
+            EditorAction::ToggleWidthMode => {
+                state.width_mode = match state.width_mode {
+                    WidthMode::Lanes => WidthMode::Seamless,
+                    WidthMode::Seamless => WidthMode::Lanes,
+                };
+                if state.width_mode == WidthMode::Seamless {
+                    state.lane_setting = LaneSetting::Auto;
+                } else {
+                    let l = state.effective_lanes();
+                    state.lane_setting = LaneSetting::Fixed(l);
+                    state.road_width = match l {
+                        1 => 4.0,
+                        2 => 8.0,
+                        4 => 15.0,
+                        _ => 8.0,
+                    };
+                    let w = state.road_width;
+                    for wp in state.waypoints.iter_mut() {
+                        wp.width = w;
+                    }
+                }
+                state.dirty = true;
+            }
             EditorAction::AdjustRoadWidth(delta) => {
-                state.road_width = (state.road_width + delta).clamp(3.5, 16.0);
+                match state.width_mode {
+                    WidthMode::Lanes => {
+                        let current_lanes = state.effective_lanes();
+                        let new_lanes = if *delta > 0.0 {
+                            match current_lanes {
+                                1 => 2,
+                                2 => 4,
+                                _ => 4,
+                            }
+                        } else {
+                            match current_lanes {
+                                4 => 2,
+                                2 => 1,
+                                _ => 1,
+                            }
+                        };
+                        let target_width = match new_lanes {
+                            1 => 4.0,
+                            2 => 8.0,
+                            4 => 15.0,
+                            _ => 8.0,
+                        };
+                        state.road_width = target_width;
+                        state.lane_setting = LaneSetting::Fixed(new_lanes);
+                    }
+                    WidthMode::Seamless => {
+                        state.road_width = (state.road_width + delta).clamp(3.5, 18.0);
+                        state.lane_setting = LaneSetting::Auto;
+                    }
+                }
                 let w = state.road_width;
                 for wp in state.waypoints.iter_mut() {
                     wp.width = w;
@@ -396,12 +509,14 @@ pub fn apply_editor_actions(
     }
 }
 
-/// Updates spline samples and rebuilds road mesh & bridge pylons whenever dirty
+/// Updates spline samples, road texture, road mesh, bridge pylons & roadside posts whenever dirty
 pub fn update_road_mesh_system(
     mut commands: Commands,
     mut state: ResMut<EditorState>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
     road_material: Res<RoadMaterialHandle>,
+    road_texture_handle: Res<RoadTextureImageHandle>,
     pylon_material: Res<PylonMaterialHandle>,
     post_mesh: Res<PostMeshHandle>,
     post_material: Res<PostMaterialHandle>,
@@ -414,6 +529,11 @@ pub fn update_road_mesh_system(
         return;
     }
     state.dirty = false;
+
+    // 0. Update road texture in-place to adjust to road width and lanes
+    if let Some(mut img) = images.get_mut(&road_texture_handle.0) {
+        *img = create_road_texture(state.road_width, state.effective_lanes());
+    }
 
     // 1. Recompute spline samples with terrain clearance
     let samples = sample_spline(&state.waypoints, 0.8, &heightmap);
@@ -443,7 +563,7 @@ pub fn update_road_mesh_system(
         return;
     }
 
-    // 3. Spawn new road mesh conformed to heightmap texture
+    // 3. Spawn new road mesh conformed to heightmap
     let road_mesh = build_road_mesh(&samples, &heightmap);
     let mesh_handle = meshes.add(road_mesh);
 
@@ -453,15 +573,16 @@ pub fn update_road_mesh_system(
         RoadMeshMarker,
     ));
 
-    // 4. Batch spawn bridge pylons
+    // 4. Batch spawn bridge pylons (scaled to road width)
     let pylons = generate_bridge_pylons(&samples, &heightmap);
     let cylinder_proto = meshes.add(Cylinder::new(1.1, 1.0));
     let pylon_mat = pylon_material.0.clone();
+    let pylon_radius = (state.road_width * 0.10).clamp(0.9, 2.2);
 
     commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| (
         Mesh3d(cylinder_proto.clone()),
         MeshMaterial3d(pylon_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::new(1.0, height, 1.0)),
+        Transform::from_translation(pos).with_scale(Vec3::new(pylon_radius, height, pylon_radius)),
         RoadPylonMarker,
     )));
 
@@ -585,9 +706,12 @@ pub fn setup_materials_and_assets(
     heightmap: Res<HeightmapData>,
     mut editor_state: ResMut<EditorState>,
 ) {
-    // 1. Road PBR Material with custom procedural asphalt & marking texture
-    let road_img = create_road_texture();
+    // 1. Road PBR Material with procedural texture adapted to initial road width and lanes
+    let initial_width = editor_state.road_width;
+    let initial_lanes = editor_state.effective_lanes();
+    let road_img = create_road_texture(initial_width, initial_lanes);
     let road_img_handle = images.add(road_img);
+    commands.insert_resource(RoadTextureImageHandle(road_img_handle.clone()));
 
     let road_mat_handle = materials.add(StandardMaterial {
         base_color_texture: Some(road_img_handle),
@@ -636,6 +760,9 @@ pub fn setup_materials_and_assets(
     // 5. Load initial scenic road preset
     load_preset(&mut editor_state, 1, &heightmap);
 }
+
+#[derive(Resource, Clone)]
+pub struct RoadTextureImageHandle(pub Handle<Image>);
 
 #[derive(Resource)]
 pub struct RoadMaterialHandle(pub Handle<StandardMaterial>);
