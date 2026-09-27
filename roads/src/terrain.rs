@@ -1,10 +1,10 @@
-use bevy::prelude::*;
+use crate::camera::RtsCamera;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::path::Path;
-use crate::camera::RtsCamera;
 
 pub const MAP_SIZE: f32 = 340.0;
 pub const HALF_MAP: f32 = MAP_SIZE * 0.5;
@@ -46,25 +46,25 @@ impl HeightmapData {
     /// Loads heightmap from assets/heightmap.png or generates a new 16-bit PNG if missing
     pub fn load_or_generate() -> Self {
         let path = Path::new(HEIGHTMAP_FILE);
-        if path.exists() {
-            if let Ok(img) = image::open(path) {
-                let gray = img.to_luma16();
-                let (w, h) = gray.dimensions();
-                let mut heights = Vec::with_capacity((w * h) as usize);
-                for y in 0..h {
-                    for x in 0..w {
-                        let val = gray.get_pixel(x, y).0[0] as f32 / 65535.0;
-                        let height_m = MIN_ALTITUDE + val * (MAX_ALTITUDE - MIN_ALTITUDE);
-                        heights.push(height_m);
-                    }
+        if path.exists()
+            && let Ok(img) = image::open(path)
+        {
+            let gray = img.to_luma16();
+            let (w, h) = gray.dimensions();
+            let mut heights = Vec::with_capacity((w * h) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    let val = gray.get_pixel(x, y).0[0] as f32 / 65535.0;
+                    let height_m = MIN_ALTITUDE + val * (MAX_ALTITUDE - MIN_ALTITUDE);
+                    heights.push(height_m);
                 }
-                return Self {
-                    width: w,
-                    height: h,
-                    map_size: MAP_SIZE,
-                    heights,
-                };
             }
+            return Self {
+                width: w,
+                height: h,
+                map_size: MAP_SIZE,
+                heights,
+            };
         }
 
         Self::generate_and_save(path)
@@ -73,7 +73,8 @@ impl HeightmapData {
     /// Generates a smooth countryside heightmap suitable for towns & cities,
     /// guaranteed C^2 smooth across all 4 quadrants without coordinate boundary artifacts.
     pub fn generate_and_save(path: &Path) -> Self {
-        let mut img_buf = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::new(TEX_WIDTH, TEX_HEIGHT);
+        let mut img_buf =
+            image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::new(TEX_WIDTH, TEX_HEIGHT);
         let mut heights = Vec::with_capacity((TEX_WIDTH * TEX_HEIGHT) as usize);
 
         for y in 0..TEX_HEIGHT {
@@ -87,7 +88,8 @@ impl HeightmapData {
                 let h_val = generate_smooth_landscape_math(world_x, world_z);
                 heights.push(h_val);
 
-                let norm_val = ((h_val - MIN_ALTITUDE) / (MAX_ALTITUDE - MIN_ALTITUDE)).clamp(0.0, 1.0);
+                let norm_val =
+                    ((h_val - MIN_ALTITUDE) / (MAX_ALTITUDE - MIN_ALTITUDE)).clamp(0.0, 1.0);
                 let u16_val = (norm_val * 65535.0) as u16;
                 img_buf.put_pixel(x, y, image::Luma([u16_val]));
             }
@@ -186,22 +188,25 @@ impl HeightmapData {
 }
 
 fn hash2d(ix: i32, iy: i32) -> u32 {
-    let mut h = (ix as u32).wrapping_mul(374761393).wrapping_add((iy as u32).wrapping_mul(668265263));
+    let mut h = (ix as u32)
+        .wrapping_mul(374761393)
+        .wrapping_add((iy as u32).wrapping_mul(668265263));
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     h ^ (h >> 16)
 }
 
 fn grad2d(ix: i32, iy: i32) -> Vec2 {
+    const FRAC_1_SQRT_2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let h = hash2d(ix, iy) & 7;
     match h {
         0 => Vec2::new(1.0, 0.0),
         1 => Vec2::new(-1.0, 0.0),
         2 => Vec2::new(0.0, 1.0),
         3 => Vec2::new(0.0, -1.0),
-        4 => Vec2::new(0.7071, 0.7071),
-        5 => Vec2::new(-0.7071, 0.7071),
-        6 => Vec2::new(0.7071, -0.7071),
-        _ => Vec2::new(-0.7071, -0.7071),
+        4 => Vec2::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2),
+        5 => Vec2::new(-FRAC_1_SQRT_2, FRAC_1_SQRT_2),
+        6 => Vec2::new(FRAC_1_SQRT_2, -FRAC_1_SQRT_2),
+        _ => Vec2::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2),
     }
 }
 
@@ -349,7 +354,10 @@ pub fn build_terrain_mesh(heightmap: &HeightmapData) -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -444,7 +452,10 @@ pub fn build_water_mesh() -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -589,10 +600,7 @@ pub fn setup_environment(
 }
 
 /// Subtle realistic river current / wave ripple animation
-pub fn animate_water_system(
-    time: Res<Time>,
-    mut query: Query<&mut Transform, With<WaterMarker>>,
-) {
+pub fn animate_water_system(time: Res<Time>, mut query: Query<&mut Transform, With<WaterMarker>>) {
     let t = time.elapsed_secs();
     for mut transform in query.iter_mut() {
         // Very subtle rhythmic breathing of the water surface
@@ -610,19 +618,28 @@ mod tests {
         assert_eq!(hm.width, TEX_WIDTH);
         assert_eq!(hm.height, TEX_HEIGHT);
         let h = hm.sample(0.0, 0.0);
-        assert!(h >= MIN_ALTITUDE && h <= MAX_ALTITUDE);
+        assert!((MIN_ALTITUDE..=MAX_ALTITUDE).contains(&h));
 
         let mut min_h = 999.0f32;
         let mut max_h = -999.0f32;
         let mut underwater_count = 0usize;
         for &val in &hm.heights {
-            if val < min_h { min_h = val; }
-            if val > max_h { max_h = val; }
-            if val < WATER_THRESHOLD { underwater_count += 1; }
+            if val < min_h {
+                min_h = val;
+            }
+            if val > max_h {
+                max_h = val;
+            }
+            if val < WATER_THRESHOLD {
+                underwater_count += 1;
+            }
         }
         let total_count = hm.heights.len();
         let underwater_pct = underwater_count as f32 / total_count as f32 * 100.0;
         println!("Heightmap bounds: min = {:.2}m, max = {:.2}m", min_h, max_h);
-        println!("Underwater coverage at threshold {:.2}m: {:.1}%", WATER_THRESHOLD, underwater_pct);
+        println!(
+            "Underwater coverage at threshold {:.2}m: {:.1}%",
+            WATER_THRESHOLD, underwater_pct
+        );
     }
 }

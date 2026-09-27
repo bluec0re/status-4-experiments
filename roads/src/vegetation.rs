@@ -1,22 +1,21 @@
-use bevy::prelude::*;
 use crate::editor::{EditorSet, EditorState, update_road_mesh_system};
 use crate::spline::SplineSample;
-use crate::terrain::{HeightmapData, HALF_MAP, WATER_THRESHOLD};
+use crate::terrain::{HALF_MAP, HeightmapData, WATER_THRESHOLD};
+use bevy::prelude::*;
 
 pub struct VegetationPlugin;
 
 impl Plugin for VegetationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_vegetation)
-            .add_systems(
-                Update,
-                (
-                    update_tree_targets_system
-                        .in_set(EditorSet::MeshRebuild)
-                        .after(update_road_mesh_system),
-                    animate_dynamic_trees_system.in_set(EditorSet::PostUpdate),
-                ),
-            );
+        app.add_systems(Startup, setup_vegetation).add_systems(
+            Update,
+            (
+                update_tree_targets_system
+                    .in_set(EditorSet::MeshRebuild)
+                    .after(update_road_mesh_system),
+                animate_dynamic_trees_system.in_set(EditorSet::PostUpdate),
+            ),
+        );
     }
 }
 
@@ -29,14 +28,14 @@ pub struct VegetationMarker;
 #[derive(Component, Clone, Debug)]
 #[require(Transform, Visibility)]
 pub struct DynamicTree {
-    pub home_pos: Vec3,         // Base natural resting position in the landscape
-    pub target_pos: Vec3,       // Target position (either home_pos or cleared roadside position)
-    pub velocity: Vec3,         // Dynamic velocity for lively spring-damper movement
-    pub base_scale: f32,        // Scale of the tree
-    pub push_offset: f32,       // Individual roadside margin variance (0.5..2.5m)
-    pub side_preference: f32,   // -1.0 or 1.0 (preferred displacement side when road is centered)
-    pub sway_phase: f32,        // Phase offset for organic breeze sway
-    pub is_displaced: bool,     // Whether the tree is currently pushed out of the way of a road
+    pub home_pos: Vec3,       // Base natural resting position in the landscape
+    pub target_pos: Vec3,     // Target position (either home_pos or cleared roadside position)
+    pub velocity: Vec3,       // Dynamic velocity for lively spring-damper movement
+    pub base_scale: f32,      // Scale of the tree
+    pub push_offset: f32,     // Individual roadside margin variance (0.5..2.5m)
+    pub side_preference: f32, // -1.0 or 1.0 (preferred displacement side when road is centered)
+    pub sway_phase: f32,      // Phase offset for organic breeze sway
+    pub is_displaced: bool,   // Whether the tree is currently pushed out of the way of a road
 }
 
 /// Builds a realistic procedural conifer/deciduous-style pine tree mesh with trunk and needle canopy
@@ -88,11 +87,7 @@ pub fn create_pine_tree_mesh() -> Mesh {
     }
 
     // 2. Three stacked foliage cones
-    let tiers = [
-        (1.4, 4.2, 2.0),
-        (2.8, 5.6, 1.5),
-        (4.2, 6.8, 0.95),
-    ];
+    let tiers = [(1.4, 4.2, 2.0), (2.8, 5.6, 1.5), (4.2, 6.8, 0.95)];
 
     for (y_base, y_tip, r) in tiers {
         let tip_idx = positions.len() as u32;
@@ -123,7 +118,10 @@ pub fn create_pine_tree_mesh() -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        bevy::render::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
@@ -160,7 +158,11 @@ pub fn compute_world_tree_homes(heightmap: &HeightmapData) -> Vec<DynamicTree> {
                 if norm.y > 0.88 && dist_to_river > 15.0 && y > (WATER_THRESHOLD + 0.9) {
                     let scale = 0.85 + ((tx * 9.0 + tz * 13.0).sin().abs() * 0.4);
                     let push_offset = 0.5 + ((tx * 13.7 + tz * 7.9).sin().abs() * 2.0);
-                    let side_pref = if (tx * 31.0 + tz * 17.0).sin() >= 0.0 { 1.0 } else { -1.0 };
+                    let side_pref = if (tx * 31.0 + tz * 17.0).sin() >= 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     let sway_phase = (tx * 3.1 + tz * 5.7).abs();
                     let home = Vec3::new(tx, y, tz);
 
@@ -321,13 +323,18 @@ pub fn calculate_tree_target(
     let tree_xz = Vec2::new(tree.home_pos.x, tree.home_pos.z);
 
     // Fast rejection: check road AABB
-    if let Some((min_p, max_p)) = road_bbox {
-        if tree_xz.x < min_p.x || tree_xz.x > max_p.x || tree_xz.y < min_p.y || tree_xz.y > max_p.y {
-            return (tree.home_pos, false);
-        }
+    if let Some((min_p, max_p)) = road_bbox
+        && (tree_xz.x < min_p.x
+            || tree_xz.x > max_p.x
+            || tree_xz.y < min_p.y
+            || tree_xz.y > max_p.y)
+    {
+        return (tree.home_pos, false);
     }
 
-    let Some((road_pt, road_normal, road_width, dist_to_road)) = find_closest_road_point(tree_xz, road_samples) else {
+    let Some((road_pt, road_normal, road_width, dist_to_road)) =
+        find_closest_road_point(tree_xz, road_samples)
+    else {
         return (tree.home_pos, false);
     };
 
@@ -345,7 +352,11 @@ pub fn calculate_tree_target(
         away.normalize()
     } else {
         // Right on centerline: use road normal along preferred side
-        let n = if road_normal.length_squared() > 1e-4 { road_normal } else { Vec2::X };
+        let n = if road_normal.length_squared() > 1e-4 {
+            road_normal
+        } else {
+            Vec2::X
+        };
         if tree.side_preference >= 0.0 { n } else { -n }
     };
     if push_dir.length_squared() < 1e-4 {
@@ -405,11 +416,21 @@ pub fn update_tree_targets_system(
         let mut max_w = 0.0f32;
 
         for s in samples.iter() {
-            if s.pos.x < min_x { min_x = s.pos.x; }
-            if s.pos.x > max_x { max_x = s.pos.x; }
-            if s.pos.z < min_z { min_z = s.pos.z; }
-            if s.pos.z > max_z { max_z = s.pos.z; }
-            if s.width > max_w { max_w = s.width; }
+            if s.pos.x < min_x {
+                min_x = s.pos.x;
+            }
+            if s.pos.x > max_x {
+                max_x = s.pos.x;
+            }
+            if s.pos.z < min_z {
+                min_z = s.pos.z;
+            }
+            if s.pos.z > max_z {
+                max_z = s.pos.z;
+            }
+            if s.width > max_w {
+                max_w = s.width;
+            }
         }
 
         let margin = max_w * 0.5 + 8.5;
@@ -537,7 +558,10 @@ mod tests {
         for tree in &trees {
             assert!(tree.home_pos.x.abs() <= HALF_MAP);
             assert!(tree.home_pos.z.abs() <= HALF_MAP);
-            assert!(tree.home_pos.y > (WATER_THRESHOLD + 0.9), "Tree cannot be spawned underwater");
+            assert!(
+                tree.home_pos.y > (WATER_THRESHOLD + 0.9),
+                "Tree cannot be spawned underwater"
+            );
             assert_eq!(tree.home_pos, tree.target_pos);
             assert!(!tree.is_displaced);
         }
@@ -598,9 +622,16 @@ mod tests {
 
         // 4. Clear the road: tree must return to home
         let empty_samples: Vec<SplineSample> = Vec::new();
-        let (cleared_target, cleared_displaced) = calculate_tree_target(&tree, &empty_samples, &hm, None);
-        assert!(!cleared_displaced, "Tree must not be displaced when no road exists");
-        assert_eq!(cleared_target, tree.home_pos, "Tree must return home when road is cleared");
+        let (cleared_target, cleared_displaced) =
+            calculate_tree_target(&tree, &empty_samples, &hm, None);
+        assert!(
+            !cleared_displaced,
+            "Tree must not be displaced when no road exists"
+        );
+        assert_eq!(
+            cleared_target, tree.home_pos,
+            "Tree must return home when road is cleared"
+        );
     }
 
     #[test]
@@ -622,7 +653,10 @@ mod tests {
 
         // Simulate 2 seconds of spring physics
         for _ in 0..120 {
-            let diff_xz = Vec2::new(tree.target_pos.x - current_pos.x, tree.target_pos.z - current_pos.z);
+            let diff_xz = Vec2::new(
+                tree.target_pos.x - current_pos.x,
+                tree.target_pos.z - current_pos.z,
+            );
             let force = Vec3::new(diff_xz.x, 0.0, diff_xz.y) * 28.0 - tree.velocity * 8.8;
             tree.velocity += force * dt;
             current_pos += tree.velocity * dt;
@@ -630,7 +664,15 @@ mod tests {
         }
 
         let err = (current_pos.x - tree.target_pos.x).abs();
-        assert!(err < 0.1, "Tree should converge to target position, err: {:.3}", err);
-        assert!(tree.velocity.length() < 0.2, "Tree velocity should settle, got: {:.3}", tree.velocity.length());
+        assert!(
+            err < 0.1,
+            "Tree should converge to target position, err: {:.3}",
+            err
+        );
+        assert!(
+            tree.velocity.length() < 0.2,
+            "Tree velocity should settle, got: {:.3}",
+            tree.velocity.length()
+        );
     }
 }

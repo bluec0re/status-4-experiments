@@ -1,12 +1,12 @@
-use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use crate::camera::RtsCamera;
 use crate::road::{
-    build_road_mesh, create_road_texture, generate_bridge_pylons, generate_road_posts,
-    RoadMeshMarker, RoadPylonMarker,
+    RoadMeshMarker, RoadPylonMarker, build_road_mesh, create_road_texture, generate_bridge_pylons,
+    generate_road_posts,
 };
-use crate::spline::{sample_spline, RoadWaypoint, SplineSample};
+use crate::spline::{RoadWaypoint, SplineSample, sample_spline};
 use crate::terrain::HeightmapData;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 /// Message type decoupling UI button clicks and hotkeys from editor state mutations
 #[derive(Message, Clone, Debug)]
@@ -52,10 +52,7 @@ impl Plugin for RoadEditorPlugin {
                 (
                     handle_editor_input.in_set(EditorSet::Input),
                     apply_editor_actions.in_set(EditorSet::ApplyActions),
-                    (
-                        update_road_mesh_system,
-                        update_ride_along_camera,
-                    )
+                    (update_road_mesh_system, update_ride_along_camera)
                         .in_set(EditorSet::MeshRebuild),
                     draw_editor_gizmos.in_set(EditorSet::PostUpdate),
                 ),
@@ -175,15 +172,17 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             state.lane_setting = LaneSetting::Fixed(2);
             let pts = [
                 Vec3::new(-110.0, 0.0, -60.0),
-                Vec3::new(-60.0,  0.0, -30.0),
-                Vec3::new(-10.0,  0.0, -10.0),
-                Vec3::new( 35.0,  0.0,  15.0),
-                Vec3::new( 75.0,  0.0,  50.0),
-                Vec3::new( 115.0, 0.0,  85.0),
+                Vec3::new(-60.0, 0.0, -30.0),
+                Vec3::new(-10.0, 0.0, -10.0),
+                Vec3::new(35.0, 0.0, 15.0),
+                Vec3::new(75.0, 0.0, 50.0),
+                Vec3::new(115.0, 0.0, 85.0),
             ];
             for p in pts {
                 let y = heightmap.sample(p.x, p.z) + state.height_offset;
-                state.waypoints.push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
         }
         2 => {
@@ -191,11 +190,11 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             state.road_width = 15.0;
             state.lane_setting = LaneSetting::Fixed(4);
             let pts = [
-                Vec3::new(-100.0, 0.0,  45.0),
-                Vec3::new(-50.0,  0.0,  20.0),
-                Vec3::new(  5.0,  0.0,   0.0),
-                Vec3::new( 60.0,  0.0, -20.0),
-                Vec3::new(110.0,  0.0, -45.0),
+                Vec3::new(-100.0, 0.0, 45.0),
+                Vec3::new(-50.0, 0.0, 20.0),
+                Vec3::new(5.0, 0.0, 0.0),
+                Vec3::new(60.0, 0.0, -20.0),
+                Vec3::new(110.0, 0.0, -45.0),
             ];
             for (i, p) in pts.iter().enumerate() {
                 let mut y = heightmap.sample(p.x, p.z) + state.height_offset;
@@ -204,7 +203,9 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
                 } else if i == 1 || i == 3 {
                     y = y.max(12.0);
                 }
-                state.waypoints.push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
         }
         3 => {
@@ -212,17 +213,19 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
             state.road_width = 8.0;
             state.lane_setting = LaneSetting::Fixed(2);
             let pts = [
-                Vec3::new(-80.0, 0.0,  70.0),
-                Vec3::new(-30.0, 0.0,  85.0),
-                Vec3::new( 25.0, 0.0,  65.0),
-                Vec3::new( 55.0, 0.0,  20.0),
-                Vec3::new( 30.0, 0.0, -35.0),
+                Vec3::new(-80.0, 0.0, 70.0),
+                Vec3::new(-30.0, 0.0, 85.0),
+                Vec3::new(25.0, 0.0, 65.0),
+                Vec3::new(55.0, 0.0, 20.0),
+                Vec3::new(30.0, 0.0, -35.0),
                 Vec3::new(-20.0, 0.0, -65.0),
                 Vec3::new(-75.0, 0.0, -50.0),
             ];
             for p in pts {
                 let y = heightmap.sample(p.x, p.z) + state.height_offset;
-                state.waypoints.push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
+                state
+                    .waypoints
+                    .push(RoadWaypoint::new(Vec3::new(p.x, y, p.z), state.road_width));
             }
         }
         _ => {}
@@ -232,7 +235,12 @@ pub fn load_preset(state: &mut EditorState, preset_index: usize, heightmap: &Hei
 }
 
 /// Ray vs Sphere collision test
-fn ray_sphere_intersect(ray_origin: Vec3, ray_dir: Vec3, sphere_center: Vec3, radius: f32) -> Option<f32> {
+fn ray_sphere_intersect(
+    ray_origin: Vec3,
+    ray_dir: Vec3,
+    sphere_center: Vec3,
+    radius: f32,
+) -> Option<f32> {
     let m = ray_origin - sphere_center;
     let b = m.dot(ray_dir);
     let c = m.dot(m) - radius * radius;
@@ -313,12 +321,19 @@ pub fn handle_editor_input(
     }
 
     // Delete selected node
-    if keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace) || keys.just_pressed(KeyCode::KeyX) {
+    if keys.just_pressed(KeyCode::Delete)
+        || keys.just_pressed(KeyCode::Backspace)
+        || keys.just_pressed(KeyCode::KeyX)
+    {
         action_writer.write(EditorAction::DeleteSelectedNode);
     }
 
-    let Some(c_pos) = cursor_pos else { return; };
-    let Ok(ray) = camera.viewport_to_world(cam_gt, c_pos) else { return; };
+    let Some(c_pos) = cursor_pos else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(cam_gt, c_pos) else {
+        return;
+    };
 
     // Find hovered waypoint sphere
     let mut closest_wp = None;
@@ -326,11 +341,11 @@ pub fn handle_editor_input(
     let node_radius = 2.2f32;
 
     for (i, wp) in state.waypoints.iter().enumerate() {
-        if let Some(t) = ray_sphere_intersect(ray.origin, ray.direction.into(), wp.pos, node_radius) {
-            if t < closest_dist {
-                closest_dist = t;
-                closest_wp = Some(i);
-            }
+        if let Some(t) = ray_sphere_intersect(ray.origin, ray.direction.into(), wp.pos, node_radius)
+            && t < closest_dist
+        {
+            closest_dist = t;
+            closest_wp = Some(i);
         }
     }
 
@@ -366,22 +381,21 @@ pub fn handle_editor_input(
     }
 
     // Dragging selected waypoint
-    if state.is_dragging && mouse_button.pressed(MouseButton::Left) {
-        if let Some(sel) = state.selected_node {
-            if sel < state.waypoints.len() {
-                if let Some(terrain_pt) = heightmap.raycast(ray.origin, ray.direction.into()) {
-                    let keep_elevation = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-                    let y = if keep_elevation {
-                        state.waypoints[sel].pos.y
-                    } else {
-                        heightmap.sample(terrain_pt.x, terrain_pt.z) + state.height_offset
-                    };
+    if state.is_dragging
+        && mouse_button.pressed(MouseButton::Left)
+        && let Some(sel) = state.selected_node
+        && sel < state.waypoints.len()
+        && let Some(terrain_pt) = heightmap.raycast(ray.origin, ray.direction.into())
+    {
+        let keep_elevation = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let y = if keep_elevation {
+            state.waypoints[sel].pos.y
+        } else {
+            heightmap.sample(terrain_pt.x, terrain_pt.z) + state.height_offset
+        };
 
-                    state.waypoints[sel].pos = Vec3::new(terrain_pt.x, y, terrain_pt.z);
-                    state.dirty = true;
-                }
-            }
-        }
+        state.waypoints[sel].pos = Vec3::new(terrain_pt.x, y, terrain_pt.z);
+        state.dirty = true;
     }
 }
 
@@ -493,23 +507,25 @@ pub fn apply_editor_actions(
                 state.dirty = true;
             }
             EditorAction::DeleteSelectedNode => {
-                if let Some(sel) = state.selected_node {
-                    if sel < state.waypoints.len() {
-                        state.waypoints.remove(sel);
-                        state.selected_node = None;
-                        state.hovered_node = None;
-                        state.is_dragging = false;
-                        state.dirty = true;
-                    }
+                if let Some(sel) = state.selected_node
+                    && sel < state.waypoints.len()
+                {
+                    state.waypoints.remove(sel);
+                    state.selected_node = None;
+                    state.hovered_node = None;
+                    state.is_dragging = false;
+                    state.dirty = true;
                 }
             }
             EditorAction::AdjustNodeElevation(delta) => {
-                if let Some(sel) = state.selected_node {
-                    if sel < state.waypoints.len() {
-                        let ground_y = heightmap.sample(state.waypoints[sel].pos.x, state.waypoints[sel].pos.z);
-                        state.waypoints[sel].pos.y = (state.waypoints[sel].pos.y + delta).max(ground_y + 0.08);
-                        state.dirty = true;
-                    }
+                if let Some(sel) = state.selected_node
+                    && sel < state.waypoints.len()
+                {
+                    let ground_y =
+                        heightmap.sample(state.waypoints[sel].pos.x, state.waypoints[sel].pos.z);
+                    state.waypoints[sel].pos.y =
+                        (state.waypoints[sel].pos.y + delta).max(ground_y + 0.08);
+                    state.dirty = true;
                 }
             }
         }
@@ -587,24 +603,32 @@ pub fn update_road_mesh_system(
     let pylon_mat = pylon_material.0.clone();
     let pylon_radius = (state.road_width * 0.10).clamp(0.9, 2.2);
 
-    commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| (
-        Mesh3d(cylinder_proto.clone()),
-        MeshMaterial3d(pylon_mat.clone()),
-        Transform::from_translation(pos).with_scale(Vec3::new(pylon_radius, height, pylon_radius)),
-        RoadPylonMarker,
-    )));
+    commands.spawn_batch(pylons.into_iter().map(move |(pos, height)| {
+        (
+            Mesh3d(cylinder_proto.clone()),
+            MeshMaterial3d(pylon_mat.clone()),
+            Transform::from_translation(pos).with_scale(Vec3::new(
+                pylon_radius,
+                height,
+                pylon_radius,
+            )),
+            RoadPylonMarker,
+        )
+    }));
 
     // 5. Batch spawn roadside delineator posts
     let posts = generate_road_posts(&samples);
     let p_mesh = post_mesh.0.clone();
     let p_mat = post_material.0.clone();
 
-    commands.spawn_batch(posts.into_iter().map(move |(pos, rot)| (
-        Mesh3d(p_mesh.clone()),
-        MeshMaterial3d(p_mat.clone()),
-        Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
-        RoadPostMarker,
-    )));
+    commands.spawn_batch(posts.into_iter().map(move |(pos, rot)| {
+        (
+            Mesh3d(p_mesh.clone()),
+            MeshMaterial3d(p_mat.clone()),
+            Transform::from_translation(pos + Vec3::Y * 0.45).with_rotation(rot),
+            RoadPostMarker,
+        )
+    }));
 }
 
 /// Handles the Ride-Along camera mode (F key)
@@ -617,7 +641,9 @@ pub fn update_ride_along_camera(
         return;
     }
 
-    let Ok(mut cam_transform) = camera_query.single_mut() else { return; };
+    let Ok(mut cam_transform) = camera_query.single_mut() else {
+        return;
+    };
     let dt = time.delta_secs();
 
     state.ride_dist += state.ride_speed * dt;
@@ -669,9 +695,25 @@ pub fn draw_editor_gizmos(
 
         let ground_y = heightmap.sample(wp.pos.x, wp.pos.z);
         let ground_pt = Vec3::new(wp.pos.x, ground_y, wp.pos.z);
-        gizmos.line(wp.pos, ground_pt, Color::srgba(col.to_srgba().red, col.to_srgba().green, col.to_srgba().blue, 0.6));
+        gizmos.line(
+            wp.pos,
+            ground_pt,
+            Color::srgba(
+                col.to_srgba().red,
+                col.to_srgba().green,
+                col.to_srgba().blue,
+                0.6,
+            ),
+        );
 
-        gizmos.circle(Isometry3d::new(ground_pt + Vec3::Y * 0.05, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)), radius * 1.5, col);
+        gizmos.circle(
+            Isometry3d::new(
+                ground_pt + Vec3::Y * 0.05,
+                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            ),
+            radius * 1.5,
+            col,
+        );
     }
 }
 

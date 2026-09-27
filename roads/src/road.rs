@@ -1,10 +1,10 @@
-use bevy::prelude::*;
-use bevy::asset::RenderAssetUsages;
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::render::mesh::{Indices, PrimitiveTopology};
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::spline::SplineSample;
 use crate::terrain::HeightmapData;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::prelude::*;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 #[derive(Component)]
 #[require(Transform, Visibility)]
@@ -18,7 +18,10 @@ pub struct RoadPylonMarker;
 /// conforming strictly to the terrain texture to eliminate ground clipping.
 pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> Mesh {
     if samples.len() < 2 {
-        return Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        return Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
     }
 
     // Cross-section has 9 points across:
@@ -39,7 +42,8 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
     let mut normals: Vec<[f32; 3]> = Vec::with_capacity(total_verts);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(total_verts);
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(total_verts);
-    let mut indices: Vec<u32> = Vec::with_capacity((num_slices - 1) * 6 * (num_verts_per_slice - 1));
+    let mut indices: Vec<u32> =
+        Vec::with_capacity((num_slices - 1) * 6 * (num_verts_per_slice - 1));
 
     let v_scale = 0.25; // Repeats texture every 4 meters
 
@@ -62,28 +66,48 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
         let pts: [(f32, f32, f32, [f32; 4]); 9] = if is_bridge {
             // Elevated viaduct bridge profile with safety parapets/railings
             [
-                (-(half_w + 0.4), -1.2, 0.0,  [0.35, 0.35, 0.38, 1.0]), // Bridge bottom-left
+                (-(half_w + 0.4), -1.2, 0.0, [0.35, 0.35, 0.38, 1.0]), // Bridge bottom-left
                 (-(half_w + 0.4), -0.6, 0.04, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-left
-                (-(half_w + 0.3),  0.4, 0.08, [0.72, 0.72, 0.76, 1.0]), // Railing top-left
-                (-half_w,          0.0, 0.15, [0.35, 0.35, 0.38, 1.0]), // Deck road left
-                ( 0.0,             0.04, 0.5, [0.35, 0.35, 0.38, 1.0]), // Crown center
-                ( half_w,          0.0, 0.85, [0.35, 0.35, 0.38, 1.0]), // Deck road right
-                ( half_w + 0.3,    0.4, 0.92, [0.72, 0.72, 0.76, 1.0]), // Railing top-right
-                ( half_w + 0.4,   -0.6, 0.96, [0.45, 0.45, 0.48, 1.0]), // Bridge girder-right
-                ( half_w + 0.4,   -1.2, 1.0,  [0.35, 0.35, 0.38, 1.0]), // Bridge bottom-right
+                (-(half_w + 0.3), 0.4, 0.08, [0.72, 0.72, 0.76, 1.0]), // Railing top-left
+                (-half_w, 0.0, 0.15, [0.35, 0.35, 0.38, 1.0]),         // Deck road left
+                (0.0, 0.04, 0.5, [0.35, 0.35, 0.38, 1.0]),             // Crown center
+                (half_w, 0.0, 0.85, [0.35, 0.35, 0.38, 1.0]),          // Deck road right
+                (half_w + 0.3, 0.4, 0.92, [0.72, 0.72, 0.76, 1.0]),    // Railing top-right
+                (half_w + 0.4, -0.6, 0.96, [0.45, 0.45, 0.48, 1.0]),   // Bridge girder-right
+                (half_w + 0.4, -1.2, 1.0, [0.35, 0.35, 0.38, 1.0]),    // Bridge bottom-right
             ]
         } else {
             // Embankment cross-section smoothly blended into hillside
             [
-                (-(half_w + shoulder_w + embankment_w + 0.4), 0.0, 0.0,  [0.26, 0.32, 0.20, 1.0]), // Subterranean left
-                (-(half_w + shoulder_w + embankment_w),       0.0, 0.02, [0.28, 0.36, 0.22, 1.0]), // Surface embankment left
-                (-(half_w + shoulder_w),                     -0.05, 0.08, [0.42, 0.40, 0.36, 1.0]), // Shoulder left
-                (-half_w,                                     0.0, 0.15, [0.32, 0.32, 0.34, 1.0]), // Road edge left
-                ( 0.0,                                        0.05, 0.5,  [0.32, 0.32, 0.34, 1.0]), // Crown center
-                ( half_w,                                     0.0, 0.85, [0.32, 0.32, 0.34, 1.0]), // Road edge right
-                ( half_w + shoulder_w,                       -0.05, 0.92, [0.42, 0.40, 0.36, 1.0]), // Shoulder right
-                ( half_w + shoulder_w + embankment_w,         0.0, 0.98, [0.28, 0.36, 0.22, 1.0]), // Surface embankment right
-                ( half_w + shoulder_w + embankment_w + 0.4,   0.0, 1.0,  [0.26, 0.32, 0.20, 1.0]), // Subterranean right
+                (
+                    -(half_w + shoulder_w + embankment_w + 0.4),
+                    0.0,
+                    0.0,
+                    [0.26, 0.32, 0.20, 1.0],
+                ), // Subterranean left
+                (
+                    -(half_w + shoulder_w + embankment_w),
+                    0.0,
+                    0.02,
+                    [0.28, 0.36, 0.22, 1.0],
+                ), // Surface embankment left
+                (-(half_w + shoulder_w), -0.05, 0.08, [0.42, 0.40, 0.36, 1.0]), // Shoulder left
+                (-half_w, 0.0, 0.15, [0.32, 0.32, 0.34, 1.0]),                  // Road edge left
+                (0.0, 0.05, 0.5, [0.32, 0.32, 0.34, 1.0]),                      // Crown center
+                (half_w, 0.0, 0.85, [0.32, 0.32, 0.34, 1.0]),                   // Road edge right
+                (half_w + shoulder_w, -0.05, 0.92, [0.42, 0.40, 0.36, 1.0]),    // Shoulder right
+                (
+                    half_w + shoulder_w + embankment_w,
+                    0.0,
+                    0.98,
+                    [0.28, 0.36, 0.22, 1.0],
+                ), // Surface embankment right
+                (
+                    half_w + shoulder_w + embankment_w + 0.4,
+                    0.0,
+                    1.0,
+                    [0.26, 0.32, 0.20, 1.0],
+                ), // Subterranean right
             ]
         };
 
@@ -146,7 +170,10 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -156,7 +183,10 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
 }
 
 /// Generates bridge pillar positions where road is elevated high above terrain
-pub fn generate_bridge_pylons(samples: &[SplineSample], heightmap: &HeightmapData) -> Vec<(Vec3, f32)> {
+pub fn generate_bridge_pylons(
+    samples: &[SplineSample],
+    heightmap: &HeightmapData,
+) -> Vec<(Vec3, f32)> {
     let mut pylons = Vec::new();
     let min_spacing = 18.0;
     let mut last_pylon_dist = -100.0;
@@ -246,7 +276,7 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
                 let x_m = u_road * rw;
 
                 // 1. Solid white outer edge lines (16cm wide, inset 6cm from asphalt edge)
-                let is_left_edge = x_m >= 0.06 && x_m <= 0.22;
+                let is_left_edge = (0.06..=0.22).contains(&x_m);
                 let is_right_edge = x_m >= (rw - 0.22) && x_m <= (rw - 0.06);
 
                 if is_left_edge || is_right_edge {
@@ -263,7 +293,9 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
                             // Single lane road: No center line.
                             // Wheel tracks for single vehicle centered in lane
                             let center = rw * 0.5;
-                            if (x_m - (center - 0.85)).abs() < 0.26 || (x_m - (center + 0.85)).abs() < 0.26 {
+                            if (x_m - (center - 0.85)).abs() < 0.26
+                                || (x_m - (center + 0.85)).abs() < 0.26
+                            {
                                 in_wheel_track = true;
                             }
                         }
@@ -281,8 +313,11 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
                             // Two sets of wheel tracks
                             let lane1_c = rw * 0.25;
                             let lane2_c = rw * 0.75;
-                            if (x_m - (lane1_c - 0.80)).abs() < 0.24 || (x_m - (lane1_c + 0.80)).abs() < 0.24
-                                || (x_m - (lane2_c - 0.80)).abs() < 0.24 || (x_m - (lane2_c + 0.80)).abs() < 0.24 {
+                            if (x_m - (lane1_c - 0.80)).abs() < 0.24
+                                || (x_m - (lane1_c + 0.80)).abs() < 0.24
+                                || (x_m - (lane2_c - 0.80)).abs() < 0.24
+                                || (x_m - (lane2_c + 0.80)).abs() < 0.24
+                            {
                                 in_wheel_track = true;
                             }
                         }
@@ -303,7 +338,9 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
                                 // Dashed white lane dividers at 1/4 and 3/4
                                 let div1 = rw * 0.25;
                                 let div2 = rw * 0.75;
-                                if ((x_m - div1).abs() <= 0.075 || (x_m - div2).abs() <= 0.075) && is_dash {
+                                if ((x_m - div1).abs() <= 0.075 || (x_m - div2).abs() <= 0.075)
+                                    && is_dash
+                                {
                                     let line_noise = (noise_val - 0.5) * 15.0;
                                     r = (235.0 + line_noise).clamp(180.0, 255.0);
                                     g = (235.0 + line_noise).clamp(180.0, 255.0);
@@ -315,7 +352,9 @@ pub fn create_road_texture(road_width: f32, lanes: usize) -> Image {
                             // Four sets of wheel tracks
                             let centers = [rw * 0.125, rw * 0.375, rw * 0.625, rw * 0.875];
                             for lc in centers {
-                                if (x_m - (lc - 0.75)).abs() < 0.22 || (x_m - (lc + 0.75)).abs() < 0.22 {
+                                if (x_m - (lc - 0.75)).abs() < 0.22
+                                    || (x_m - (lc + 0.75)).abs() < 0.22
+                                {
                                     in_wheel_track = true;
                                     break;
                                 }

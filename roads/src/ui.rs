@@ -1,21 +1,20 @@
-use bevy::prelude::*;
 use crate::editor::{EditorAction, EditorSet, EditorState, EditorTool, WidthMode};
 use crate::terrain::{HeightmapData, WATER_THRESHOLD};
+use bevy::prelude::*;
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui)
-            .add_systems(
-                Update,
-                (
-                    handle_button_clicks.in_set(EditorSet::Input),
-                    update_ui_system
-                        .in_set(EditorSet::PostUpdate)
-                        .run_if(resource_changed::<EditorState>),
-                ),
-            );
+        app.add_systems(Startup, setup_ui).add_systems(
+            Update,
+            (
+                handle_button_clicks.in_set(EditorSet::Input),
+                update_ui_system
+                    .in_set(EditorSet::PostUpdate)
+                    .run_if(resource_changed::<EditorState>),
+            ),
+        );
     }
 }
 
@@ -467,12 +466,50 @@ pub fn setup_ui(mut commands: Commands) {
 pub fn update_ui_system(
     state: Res<EditorState>,
     heightmap: Res<HeightmapData>,
-    mut stats_query: Query<&mut Text, (With<StatsTextMarker>, Without<NodeInfoTextMarker>, Without<ToolBtnTextMarker>, Without<WidthModeBtnTextMarker>)>,
-    mut node_info_query: Query<&mut Text, (With<NodeInfoTextMarker>, Without<StatsTextMarker>, Without<ToolBtnTextMarker>, Without<WidthModeBtnTextMarker>)>,
-    mut tool_btn_text: Query<&mut Text, (With<ToolBtnTextMarker>, Without<StatsTextMarker>, Without<NodeInfoTextMarker>, Without<WidthModeBtnTextMarker>)>,
-    mut width_mode_btn_text: Query<&mut Text, (With<WidthModeBtnTextMarker>, Without<StatsTextMarker>, Without<NodeInfoTextMarker>, Without<ToolBtnTextMarker>)>,
-    mut lane_btn_query: Query<(&LaneBtnMarker, &mut BackgroundColor, &mut BorderColor), Without<WidthModeBtnMarker>>,
-    mut width_mode_btn_query: Query<(&mut BackgroundColor, &mut BorderColor), With<WidthModeBtnMarker>>,
+    mut stats_query: Query<
+        &mut Text,
+        (
+            With<StatsTextMarker>,
+            Without<NodeInfoTextMarker>,
+            Without<ToolBtnTextMarker>,
+            Without<WidthModeBtnTextMarker>,
+        ),
+    >,
+    mut node_info_query: Query<
+        &mut Text,
+        (
+            With<NodeInfoTextMarker>,
+            Without<StatsTextMarker>,
+            Without<ToolBtnTextMarker>,
+            Without<WidthModeBtnTextMarker>,
+        ),
+    >,
+    mut tool_btn_text: Query<
+        &mut Text,
+        (
+            With<ToolBtnTextMarker>,
+            Without<StatsTextMarker>,
+            Without<NodeInfoTextMarker>,
+            Without<WidthModeBtnTextMarker>,
+        ),
+    >,
+    mut width_mode_btn_text: Query<
+        &mut Text,
+        (
+            With<WidthModeBtnTextMarker>,
+            Without<StatsTextMarker>,
+            Without<NodeInfoTextMarker>,
+            Without<ToolBtnTextMarker>,
+        ),
+    >,
+    mut lane_btn_query: Query<
+        (&LaneBtnMarker, &mut BackgroundColor, &mut BorderColor),
+        Without<WidthModeBtnMarker>,
+    >,
+    mut width_mode_btn_query: Query<
+        (&mut BackgroundColor, &mut BorderColor),
+        With<WidthModeBtnMarker>,
+    >,
 ) {
     let tool_str = match state.tool {
         EditorTool::SelectMove => "Select & Move [T: Add]",
@@ -610,7 +647,18 @@ pub fn handle_button_clicks(
         (Changed<Interaction>, With<Button>),
     >,
 ) {
-    for (interaction, mut bg_color, preset, clear, ride, tool_btn, lane_btn, mode_btn, adjust_btn) in interaction_query.iter_mut() {
+    for (
+        interaction,
+        mut bg_color,
+        preset,
+        clear,
+        ride,
+        tool_btn,
+        lane_btn,
+        mode_btn,
+        adjust_btn,
+    ) in interaction_query.iter_mut()
+    {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(Color::srgba(0.3, 0.4, 0.6, 0.95));
