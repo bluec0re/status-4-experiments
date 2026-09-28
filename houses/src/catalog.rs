@@ -2,11 +2,24 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use bevy::world_serialization::prelude::{WorldAsset, WorldAssetRoot};
 use crate::textures::BuildingMaterials;
 
 /// Catalog of premade reusable 3D models for European architecture and interiors
 #[derive(Resource)]
 pub struct ModelCatalog {
+    // External Premade 3D Models (glTF 2.0 / GLB)
+    pub scene_dining_table: Handle<WorldAsset>,
+    pub scene_chair: Handle<WorldAsset>,
+    pub scene_armchair: Handle<WorldAsset>,
+    pub scene_sofa: Handle<WorldAsset>,
+    pub scene_bed: Handle<WorldAsset>,
+    pub scene_bookshelf: Handle<WorldAsset>,
+    pub scene_cabinet: Handle<WorldAsset>,
+    pub scene_desk: Handle<WorldAsset>,
+    pub scene_window: Handle<WorldAsset>,
+    pub scene_door: Handle<WorldAsset>,
+
     // Windows
     pub window_standard_frame: Handle<Mesh>,
     pub window_standard_glass: Handle<Mesh>,
@@ -30,7 +43,7 @@ pub struct ModelCatalog {
     pub stairs_flight: Handle<Mesh>,
     pub stairs_handrail: Handle<Mesh>,
 
-    // Interior Furniture & Props
+    // Interior Furniture & Props (fallback procedural meshes)
     pub prop_dining_table: Handle<Mesh>,
     pub prop_chair: Handle<Mesh>,
     pub prop_bed: Handle<Mesh>,
@@ -48,6 +61,20 @@ pub struct ModelCatalog {
 
 impl FromWorld for ModelCatalog {
     fn from_world(world: &mut World) -> Self {
+        let asset_server = world.resource::<AssetServer>();
+
+        // Load external photorealistic glTF / GLB models
+        let scene_dining_table = asset_server.load("models/table/WoodenTable_02_1k.gltf#Scene0");
+        let scene_chair = asset_server.load("models/chair/WoodenChair_01_1k.gltf#Scene0");
+        let scene_armchair = asset_server.load("models/armchair/ArmChair_01_1k.gltf#Scene0");
+        let scene_sofa = asset_server.load("models/sofa/GlamVelvetSofa.glb#Scene0");
+        let scene_bed = asset_server.load("models/bed/vintage_day_bed_1k.gltf#Scene0");
+        let scene_bookshelf = asset_server.load("models/bookshelf/wooden_bookshelf_worn_1k.gltf#Scene0");
+        let scene_cabinet = asset_server.load("models/cabinet/modern_wooden_cabinet_1k.gltf#Scene0");
+        let scene_desk = asset_server.load("models/desk/SchoolDesk_01_1k.gltf#Scene0");
+        let scene_window = asset_server.load("models/window/rollershutter_window_01_1k.gltf#Scene0");
+        let scene_door = asset_server.load("models/door/large_castle_door_1k.gltf#Scene0");
+
         let mut meshes = world.resource_mut::<Assets<Mesh>>();
 
         // 1. Windows
@@ -89,6 +116,16 @@ impl FromWorld for ModelCatalog {
         let chimney_stack = meshes.add(create_chimney_mesh());
 
         Self {
+            scene_dining_table,
+            scene_chair,
+            scene_armchair,
+            scene_sofa,
+            scene_bed,
+            scene_bookshelf,
+            scene_cabinet,
+            scene_desk,
+            scene_window,
+            scene_door,
             window_standard_frame,
             window_standard_glass,
             window_french_frame,
@@ -132,14 +169,13 @@ impl ModelCatalog {
         floor_idx: u32,
     ) {
         commands.entity(parent).with_children(|builder| {
-            // Frame
+            // Instantiate photorealistic Rollershutter Window 01 (Poly Haven)
             builder.spawn((
-                Mesh3d(self.window_standard_frame.clone()),
-                MeshMaterial3d(mats.window_frame.clone()),
-                transform,
+                WorldAssetRoot(self.scene_window.clone()),
+                transform * Transform::from_scale(Vec3::new(0.68, 0.72, 0.7)),
                 crate::house::FloorLevelMarker(floor_idx),
             ));
-            // Glazing
+            // Subtle interior glass pane
             builder.spawn((
                 Mesh3d(self.window_standard_glass.clone()),
                 MeshMaterial3d(mats.window_glass.clone()),
@@ -199,11 +235,10 @@ impl ModelCatalog {
                 transform,
                 crate::house::FloorLevelMarker(0),
             ));
-            // Ornate Wooden Double Door Leaf
+            // Photorealistic Large Castle Door (Poly Haven)
             builder.spawn((
-                Mesh3d(self.door_grand_portal_leaf.clone()),
-                MeshMaterial3d(mats.door_wood.clone()),
-                transform * Transform::from_xyz(0.0, 0.0, 0.04),
+                WorldAssetRoot(self.scene_door.clone()),
+                transform * Transform::from_xyz(0.0, -1.35, 0.06) * Transform::from_scale(Vec3::new(0.9, 0.9, 0.9)),
                 crate::house::FloorLevelMarker(0),
             ));
         });
@@ -267,91 +302,94 @@ impl ModelCatalog {
         room_type: crate::house::RoomType,
         room_center: Vec3,
         rotation: Quat,
-        mats: &BuildingMaterials,
+        _mats: &BuildingMaterials,
         floor_idx: u32,
     ) {
         commands.entity(parent).with_children(|builder| {
             match room_type {
                 crate::house::RoomType::LivingRoom => {
-                    // Sofa facing center
+                    // Photorealistic Glam Velvet Sofa (Khronos)
                     builder.spawn((
-                        Mesh3d(self.prop_sofa.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
+                        WorldAssetRoot(self.scene_sofa.clone()),
                         Transform::from_translation(room_center + rotation * Vec3::new(0.0, 0.0, -1.2))
-                            * Transform::from_rotation(rotation),
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(0.85)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
-                    // Dining table and chairs
+                    // Photorealistic Wooden Dining / Coffee Table (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_dining_table.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(1.2, 0.0, 0.8))
-                            * Transform::from_rotation(rotation),
+                        WorldAssetRoot(self.scene_dining_table.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(1.1, 0.0, 0.6))
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(1.8)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
+                    // Photorealistic Upholstered Arm Chair 01 (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_chair.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(1.2, 0.0, 0.2))
-                            * Transform::from_rotation(rotation),
+                        WorldAssetRoot(self.scene_armchair.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(1.1, 0.0, -0.4))
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(0.85)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
+                    // Photorealistic Wooden Bookshelf Worn (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_chair.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(1.2, 0.0, 1.4))
-                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::PI)),
-                        crate::house::FloorLevelMarker(floor_idx),
-                    ));
-                    // Bookshelf against wall
-                    builder.spawn((
-                        Mesh3d(self.prop_bookshelf.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
+                        WorldAssetRoot(self.scene_bookshelf.clone()),
                         Transform::from_translation(room_center + rotation * Vec3::new(-1.8, 0.0, 0.0))
-                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2)),
+                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2))
+                            * Transform::from_scale(Vec3::splat(0.9)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
                 }
                 crate::house::RoomType::Bedroom => {
-                    // Double bed
+                    // Photorealistic Vintage Day Bed (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_bed.clone()),
-                        MeshMaterial3d(mats.floor_parquet.clone()),
+                        WorldAssetRoot(self.scene_bed.clone()),
                         Transform::from_translation(room_center + rotation * Vec3::new(0.0, 0.0, -0.6))
-                            * Transform::from_rotation(rotation),
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(1.0)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
-                    // Study Desk
+                    // Photorealistic School Desk (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_desk.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(1.4, 0.0, 0.8))
-                            * Transform::from_rotation(rotation),
+                        WorldAssetRoot(self.scene_desk.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(1.3, 0.0, 0.8))
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(1.1)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
+                    // Photorealistic Wooden Chair 01 (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_chair.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(1.4, 0.0, 0.3))
-                            * Transform::from_rotation(rotation),
+                        WorldAssetRoot(self.scene_chair.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(1.3, 0.0, 0.3))
+                            * Transform::from_rotation(rotation)
+                            * Transform::from_scale(Vec3::splat(0.42)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
-                    // Wardrobe / Cabinet
+                    // Photorealistic Modern Wooden Cabinet (Poly Haven)
                     builder.spawn((
-                        Mesh3d(self.prop_cabinet.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
-                        Transform::from_translation(room_center + rotation * Vec3::new(-1.4, 0.0, 0.8))
-                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2)),
+                        WorldAssetRoot(self.scene_cabinet.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(-1.4, 0.0, 0.6))
+                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2))
+                            * Transform::from_scale(Vec3::splat(0.75)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
                 }
                 crate::house::RoomType::EntranceLobby => {
-                    // Sideboard table and chandelier
+                    // Modern Wooden Cabinet in Lobby
                     builder.spawn((
-                        Mesh3d(self.prop_cabinet.clone()),
-                        MeshMaterial3d(mats.door_wood.clone()),
+                        WorldAssetRoot(self.scene_cabinet.clone()),
                         Transform::from_translation(room_center + rotation * Vec3::new(-1.2, 0.0, 0.0))
-                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2)),
+                            * Transform::from_rotation(rotation * Quat::from_rotation_y(core::f32::consts::FRAC_PI_2))
+                            * Transform::from_scale(Vec3::splat(0.75)),
+                        crate::house::FloorLevelMarker(floor_idx),
+                    ));
+                    // Waiting Armchair
+                    builder.spawn((
+                        WorldAssetRoot(self.scene_armchair.clone()),
+                        Transform::from_translation(room_center + rotation * Vec3::new(1.2, 0.0, 0.0))
+                            * Transform::from_rotation(rotation * Quat::from_rotation_y(-core::f32::consts::FRAC_PI_2))
+                            * Transform::from_scale(Vec3::splat(0.8)),
                         crate::house::FloorLevelMarker(floor_idx),
                     ));
                 }
