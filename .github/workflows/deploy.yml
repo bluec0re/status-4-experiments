@@ -1,0 +1,165 @@
+name: Deploy Experiments to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@cargo-binstall
+
+      - name: Install wasm-bindgen-cli
+        run: |
+          # Query exact wasm-bindgen crate version from Cargo metadata or lockfile
+          WASM_BINDGEN_VER=$(cargo metadata --format-version 1 --manifest-path roads/Cargo.toml | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version' | head -n 1)
+          if [ -z "$WASM_BINDGEN_VER" ] || [ "$WASM_BINDGEN_VER" = "null" ]; then
+            WASM_BINDGEN_VER="0.2.129"
+          fi
+          echo "Installing wasm-bindgen-cli version: $WASM_BINDGEN_VER"
+          cargo binstall -y --version "$WASM_BINDGEN_VER" wasm-bindgen-cli
+
+      - name: Build experiments
+        run: |
+          mkdir -p _site
+
+          # Discover all experiment directories (subdirectories containing Cargo.toml)
+          EXPERIMENTS=$(find . -maxdepth 2 -mindepth 2 -name "Cargo.toml" -exec dirname {} \; | sed 's|^\./||' | sort -u)
+          if [ -z "$EXPERIMENTS" ]; then
+            EXPERIMENTS="roads"
+          fi
+
+          echo "Experiments to build: $EXPERIMENTS"
+
+          for exp in $EXPERIMENTS; do
+            echo "=================================================="
+            echo "Building experiment: $exp"
+            echo "=================================================="
+
+            PKG_NAME=$(cargo metadata --format-version 1 --manifest-path "$exp/Cargo.toml" --no-deps | jq -r '.packages[0].name')
+            BIN_NAME=$(cargo metadata --format-version 1 --manifest-path "$exp/Cargo.toml" --no-deps | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name' | head -n 1)
+            if [ -z "$BIN_NAME" ] || [ "$BIN_NAME" = "null" ]; then
+              BIN_NAME="$PKG_NAME"
+            fi
+            echo "Resolved PKG_NAME: $PKG_NAME | BIN_NAME: $BIN_NAME"
+
+            # Build for wasm32 with bevy/web feature enabled
+            cargo build \
+              --manifest-path "$exp/Cargo.toml" \
+              --release \
+              --target wasm32-unknown-unknown \
+              --features bevy/web
+
+            # Locate compiled wasm binary (handles per-package or workspace target dir)
+            WASM_PATH="$exp/target/wasm32-unknown-unknown/release/$BIN_NAME.wasm"
+            if [ ! -f "$WASM_PATH" ]; then
+              WASM_PATH="target/wasm32-unknown-unknown/release/$BIN_NAME.wasm"
+            fi
+
+            if [ ! -f "$WASM_PATH" ]; then
+              echo "Error: compiled wasm file not found at $WASM_PATH"
+              exit 1
+            fi
+
+            EXP_SITE="_site/$exp"
+            mkdir -p "$EXP_SITE"
+
+            echo "Running wasm-bindgen into $EXP_SITE..."
+            wasm-bindgen \
+              --target web \
+              --no-typescript \
+              --out-dir "$EXP_SITE" \
+              --out-name "$BIN_NAME" \
+              "$WASM_PATH"
+
+            # Copy assets folder if present
+            if [ -d "$exp/assets" ]; then
+              echo "Copying assets for $exp..."
+              cp -r "$exp/assets" "$EXP_SITE/"
+            fi
+
+            # Copy or generate index.html
+            if [ -f "$exp/index.html" ]; then
+              echo "Copying custom index.html for $exp..."
+              cp "$exp/index.html" "$EXP_SITE/index.html"
+            elif [ -f "$exp/web/index.html" ]; then
+              echo "Copying custom web/index.html for $exp..."
+              cp "$exp/web/index.html" "$EXP_SITE/index.html"
+            else
+              echo "Generating standard index.html for $exp..."
+              cat <<EOF > "$EXP_SITE/index.html"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>$exp - Status 4 Experiments</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0f19;
+    }
+    canvas {
+      width: 100% !important; height: 100% !important; display: block; outline: none; touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas></canvas>
+  <script type="module">
+    import init from './$BIN_NAME.js';
+    init('./${BIN_NAME}_bg.wasm');
+  </script>
+</body>
+</html>
+EOF
+            fi
+          done
+
+          # Setup root landing portal
+          if [ -f "index.html" ]; then
+            cp index.html _site/index.html
+          fi
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
