@@ -266,7 +266,8 @@ pub fn setup_ui(mut commands: Commands) {
                             },
                         );
 
-                        // Wireframe Toggle Button
+                        // Wireframe Toggle Button (Native only)
+                        #[cfg(not(target_arch = "wasm32"))]
                         spawn_button(
                             card,
                             UiAction::ToggleWireframe,

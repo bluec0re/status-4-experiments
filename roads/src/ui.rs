@@ -355,7 +355,8 @@ pub fn setup_ui(mut commands: Commands) {
                                         ));
                                     });
 
-                                // Wireframe toggle button
+                                // Wireframe toggle button (Native only)
+                                #[cfg(not(target_arch = "wasm32"))]
                                 btn_row
                                     .spawn((
                                         Button,
@@ -585,7 +586,10 @@ pub fn setup_ui(mut commands: Commands) {
                 ));
 
                 let controls = [
+                    #[cfg(not(target_arch = "wasm32"))]
                     "• Z: Toggle Wireframe Overlay  |  WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
+                    #[cfg(target_arch = "wasm32")]
+                    "• WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
                     "• Mouse Scroll: Zoom In / Out (Tracks landscape height smoothly)",
                     "• Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
                     "• N: New Street  |  Click existing node in Add mode to branch / join into a Junction",
