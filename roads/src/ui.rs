@@ -605,19 +605,19 @@ pub fn setup_ui(mut commands: Commands) {
 
                 let controls = [
                     #[cfg(not(target_arch = "wasm32"))]
-                    "• Z: Toggle Wireframe Overlay  |  WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
+                    "- Z: Toggle Wireframe Overlay  |  WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
                     #[cfg(target_arch = "wasm32")]
-                    "• WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
-                    "• Mouse Scroll: Zoom In / Out (Tracks landscape height smoothly)",
-                    "• Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
-                    "• N: New Street  |  Click existing node in Add mode to branch / join into a Junction",
-                    "• Drag node onto another: Magnetic Snap & Join  |  J: Join to nearest street | Tab: Cycle Street",
-                    "• K: Cycle Junction Style (Box Junction, Turning Circle, Zebra Crossings) | P: Toggle Elevation (Warped / Planar)",
-                    "• Dynamic Trees: Trees organically part and move out of the way as roads are created or dragged",
-                    "• R / V: Raise / Lower Node Elevation (Bridge Viaducts & Pylons)",
-                    "• Delete / X: Remove Selected Node  |  [ / ]: Adjust Road Width (L: Toggle Lanes / Seamless)",
-                    "• Road Width Buttons: 1 Lane (4m), 2 Lanes (8m), 4 Lanes (15m) or Seamless Continuous",
-                    "• F: Ride-Along Cinematic Cam  |  1, 2, 3: Country Presets  |  4: Town Junctions & Crossroads",
+                    "- WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
+                    "- Mouse Scroll: Zoom In / Out (Tracks landscape height smoothly)",
+                    "- Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
+                    "- N: New Street  |  Click existing node in Add mode to branch / join into a Junction",
+                    "- Drag node onto another: Magnetic Snap & Join  |  J: Join to nearest street | Tab: Cycle Street",
+                    "- K: Cycle Junction Style (Box Junction, Turning Circle, Zebra Crossings) | P: Toggle Elevation (Warped / Planar)",
+                    "- Dynamic Trees: Trees organically part and move out of the way as roads are created or dragged",
+                    "- R / V: Raise / Lower Node Elevation (Bridge Viaducts & Pylons)",
+                    "- Delete / X: Remove Selected Node  |  [ / ]: Adjust Road Width (L: Toggle Lanes / Seamless)",
+                    "- Road Width Buttons: 1 Lane (4m), 2 Lanes (8m), 4 Lanes (15m) or Seamless Continuous",
+                    "- F: Ride-Along Cinematic Cam  |  1, 2, 3: Country Presets  |  4: Town Junctions & Crossroads",
                 ];
 
                 for line in controls {
@@ -805,7 +805,7 @@ pub fn update_ui_system(
         let junctions = detect_junctions(&state.waypoints, &state.streets);
         if let Some(j) = junctions.iter().find(|j| j.node_idx == sel) {
             format!(
-                "★ Junction Node #{}: {} connecting arms | X: {:.1}, Y: {:.1}, Z: {:.1} (Elev: +{:.1}m{}) [R/V: Elev, N: New St, J: Join]",
+                "[Junction] Node #{}: {} connecting arms | X: {:.1}, Y: {:.1}, Z: {:.1} (Elev: +{:.1}m{}) [R/V: Elev, N: New St, J: Join]",
                 sel + 1,
                 j.connected_arms.len(),
                 p.x,

@@ -259,7 +259,7 @@ fn simulate_heat_transfer(
         let conductivity = comb.material.thermal_conductivity();
         let net_heat_gain = thermal_intake * conductivity * dt;
 
-        // Latent heat: if element has moisture, heat boils water instead of raising temp above 100°C
+        // Latent heat: if element has moisture, heat boils water instead of raising temp above 100 deg C
         if comb.moisture > 0.01 && comb.temperature > 80.0 {
             let boil_off = (net_heat_gain * 0.0018).min(comb.moisture);
             comb.moisture -= boil_off;
@@ -315,7 +315,7 @@ fn update_combustion_and_fuel(
 
         // Process active combustion
         if comb.is_burning {
-            // Internal combustion heat keeps temperature high (650°C to 1050°C)
+            // Internal combustion heat keeps temperature high (650 deg C to 1050 deg C)
             let target_burn_temp = 850.0 + comb.material.heat_output() * 0.8;
             comb.temperature = comb.temperature.lerp(target_burn_temp, (3.5 * dt).min(1.0));
 

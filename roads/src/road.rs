@@ -964,7 +964,7 @@ pub fn build_junction_mesh(
         perimeter_pts.push(pt_arm_center);
         perimeter_pts.push(pt_arm_right);
 
-        // Smooth quadratic Bézier fillet rounding the corner between streets
+        // Smooth quadratic Bezier fillet rounding the corner between streets
         let arm_curr = &junction.connected_arms[i];
         let arm_next = &junction.connected_arms[(i + 1) % k];
         let d_curr = Vec3::new(arm_curr.dir.x, 0.0, arm_curr.dir.z).normalize_or_zero();

@@ -8,7 +8,7 @@ use crate::polygon::BuildingPolygon;
 pub enum EuropeanStyle {
     #[default]
     Haussmannian,         // Parisian limestone, grand rusticated base, mansard zinc roof, ornate balconies
-    BerlinAltbau,         // Classic Berlin Gründerzeit / Altbau, pastel stucco, steep pitched slate roof
+    BerlinAltbau,         // Classic Berlin Gruenderzeit / Altbau, pastel stucco, steep pitched slate roof
     VienneseNeoclassical, // Imperial yellow / warm ochre, symmetrical pilasters, terracotta roof
     AmsterdamCanal,       // Dutch canal block, brick facades, stepped gables, large sash windows
 }
@@ -24,7 +24,7 @@ impl EuropeanStyle {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Haussmannian => "Parisian Haussmannian",
-            Self::BerlinAltbau => "Berlin Gründerzeit Altbau",
+            Self::BerlinAltbau => "Berlin Gruenderzeit Altbau",
             Self::VienneseNeoclassical => "Viennese Neoclassical",
             Self::AmsterdamCanal => "Amsterdam Canal House Block",
         }

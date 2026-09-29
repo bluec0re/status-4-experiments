@@ -2,15 +2,31 @@
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
+use bevy::text::FontSource;
 use crate::fire_sim::{EnvironmentConditions, SimulationStats, TimeOfDay};
 use crate::interaction::{InteractionState, ToolMode};
 use crate::scenarios::{ScenarioState, ScenarioType};
 
 pub struct UiPlugin;
 
+/// Bundled Material Icons font resource for crisp vector icons across all platforms.
+#[derive(Resource, Clone)]
+pub struct IconFont(pub Handle<Font>);
+
+impl FromWorld for IconFont {
+    fn from_world(world: &mut World) -> Self {
+        let mut fonts = world.resource_mut::<Assets<Font>>();
+        let handle = fonts.add(Font::from_bytes(
+            include_bytes!("../assets/fonts/MaterialIcons-Regular.ttf").to_vec(),
+        ));
+        IconFont(handle)
+    }
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+        app.init_resource::<IconFont>()
+            .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_systems(Startup, setup_ui)
             .add_systems(Update, (handle_ui_buttons, update_ui_labels));
     }
@@ -45,7 +61,7 @@ pub enum UiAction {
     ResetScenario,
 }
 
-pub fn setup_ui(mut commands: Commands) {
+pub fn setup_ui(mut commands: Commands, icon_font: Res<IconFont>) {
     // Root container spanning full viewport
     commands
         .spawn(Node {
@@ -250,20 +266,14 @@ pub fn setup_ui(mut commands: Commands) {
                     ));
 
                     // Water Hose button (Primary tool)
-                    spawn_btn(
+                    spawn_tool_btn(
                         card,
                         UiAction::SelectTool(ToolMode::WaterHose),
                         Color::srgb(0.12, 0.28, 0.42),
-                        |b| {
-                            b.spawn((
-                                Text::new("💧 Water Hose (Cool/Extinguish)"),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.6, 0.9, 1.0)),
-                            ));
-                        },
+                        "\u{e798}",
+                        "Water Hose (Extinguish)",
+                        icon_font.0.clone(),
+                        Color::srgb(0.6, 0.9, 1.0),
                     );
 
                     // Hose Pressure Switch
@@ -273,8 +283,17 @@ pub fn setup_ui(mut commands: Commands) {
                         Color::srgb(0.15, 0.22, 0.32),
                         |b| {
                             b.spawn((
+                                Text::new("\u{f084}"),
+                                TextFont {
+                                    font: FontSource::Handle(icon_font.0.clone()),
+                                    font_size: FontSize::Px(13.5),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.7, 0.85, 0.95)),
+                            ));
+                            b.spawn((
                                 UiTextRole::PressureBtn,
-                                Text::new("  Water Pressure: Deluge (High)"),
+                                Text::new("Water: Deluge (High)"),
                                 TextFont {
                                     font_size: FontSize::Px(11.0),
                                     ..default()
@@ -285,71 +304,47 @@ pub fn setup_ui(mut commands: Commands) {
                     );
 
                     // Torch (Ignite)
-                    spawn_btn(
+                    spawn_tool_btn(
                         card,
                         UiAction::SelectTool(ToolMode::FireStarter),
                         Color::srgb(0.38, 0.20, 0.12),
-                        |b| {
-                            b.spawn((
-                                Text::new("🔥 Torch (Ignite Surface)"),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.7, 0.4)),
-                            ));
-                        },
+                        "\u{e80e}",
+                        "Torch (Ignite Surface)",
+                        icon_font.0.clone(),
+                        Color::srgb(1.0, 0.7, 0.4),
                     );
 
                     // Flashover Blast
-                    spawn_btn(
+                    spawn_tool_btn(
                         card,
                         UiAction::SelectTool(ToolMode::Explosion),
                         Color::srgb(0.42, 0.14, 0.14),
-                        |b| {
-                            b.spawn((
-                                Text::new("💥 Flashover Blast"),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.5, 0.5)),
-                            ));
-                        },
+                        "\u{ea0b}",
+                        "Flashover Blast",
+                        icon_font.0.clone(),
+                        Color::srgb(1.0, 0.5, 0.5),
                     );
 
                     // Firebreak
-                    spawn_btn(
+                    spawn_tool_btn(
                         card,
                         UiAction::SelectTool(ToolMode::Firebreak),
                         Color::srgb(0.24, 0.22, 0.14),
-                        |b| {
-                            b.spawn((
-                                Text::new("🚜 Bulldozer (Firebreak)"),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.9, 0.85, 0.5)),
-                            ));
-                        },
+                        "\u{ea79}",
+                        "Bulldozer (Firebreak)",
+                        icon_font.0.clone(),
+                        Color::srgb(0.9, 0.85, 0.5),
                     );
 
                     // Inspector
-                    spawn_btn(
+                    spawn_tool_btn(
                         card,
                         UiAction::SelectTool(ToolMode::Inspect),
                         Color::srgb(0.18, 0.24, 0.28),
-                        |b| {
-                            b.spawn((
-                                Text::new("🔍 Thermal Inspector"),
-                                TextFont {
-                                    font_size: FontSize::Px(11.5),
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.7, 0.85, 0.95)),
-                            ));
-                        },
+                        "\u{e8b6}",
+                        "Thermal Inspector",
+                        icon_font.0.clone(),
+                        Color::srgb(0.7, 0.85, 0.95),
                     );
 
                     // Thermal Heatmap Mode Toggle
@@ -359,8 +354,17 @@ pub fn setup_ui(mut commands: Commands) {
                         Color::srgb(0.28, 0.14, 0.32),
                         |b| {
                             b.spawn((
+                                Text::new("\u{e412}"),
+                                TextFont {
+                                    font: FontSource::Handle(icon_font.0.clone()),
+                                    font_size: FontSize::Px(13.5),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.9, 0.7, 1.0)),
+                            ));
+                            b.spawn((
                                 UiTextRole::HeatmapBtn,
-                                Text::new("📷 View: Photorealistic (PBR)"),
+                                Text::new("View: Photorealistic (PBR)"),
                                 TextFont {
                                     font_size: FontSize::Px(11.5),
                                     ..default()
@@ -411,10 +415,10 @@ pub fn setup_ui(mut commands: Commands) {
                         ..default()
                     })
                     .with_children(|row| {
-                        spawn_wind_btn(row, "← W", Vec2::new(-1.0, 0.0));
-                        spawn_wind_btn(row, "→ E", Vec2::new(1.0, 0.0));
-                        spawn_wind_btn(row, "↑ N", Vec2::new(0.0, -1.0));
-                        spawn_wind_btn(row, "↓ S", Vec2::new(0.0, 1.0));
+                        spawn_wind_btn(row, "\u{f1e6}", "W", Vec2::new(-1.0, 0.0), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1df}", "E", Vec2::new(1.0, 0.0), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1e0}", "N", Vec2::new(0.0, -1.0), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1e3}", "S", Vec2::new(0.0, 1.0), icon_font.0.clone());
                     });
 
                     card.spawn(Node {
@@ -423,10 +427,10 @@ pub fn setup_ui(mut commands: Commands) {
                         ..default()
                     })
                     .with_children(|row| {
-                        spawn_wind_btn(row, "↗ NE", Vec2::new(1.0, -1.0).normalize());
-                        spawn_wind_btn(row, "↘ SE", Vec2::new(1.0, 1.0).normalize());
-                        spawn_wind_btn(row, "↖ NW", Vec2::new(-1.0, -1.0).normalize());
-                        spawn_wind_btn(row, "↙ SW", Vec2::new(-1.0, 1.0).normalize());
+                        spawn_wind_btn(row, "\u{f1e1}", "NE", Vec2::new(1.0, -1.0).normalize(), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1e4}", "SE", Vec2::new(1.0, 1.0).normalize(), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1e2}", "NW", Vec2::new(-1.0, -1.0).normalize(), icon_font.0.clone());
+                        spawn_wind_btn(row, "\u{f1e5}", "SW", Vec2::new(-1.0, 1.0).normalize(), icon_font.0.clone());
                     });
 
                     // Wind Speed presets
@@ -479,7 +483,7 @@ pub fn setup_ui(mut commands: Commands) {
                 .with_children(|row| {
                     row.spawn((
                         UiTextRole::StatsBody,
-                        Text::new("Active Fires: 0 | Max Temp: 22°C | Water Applied: 0 L | Ash: 0"),
+                        Text::new("Active Fires: 0 | Max Temp: 22 deg C | Water Applied: 0 L | Ash: 0"),
                         TextFont {
                             font_size: FontSize::Px(12.5),
                             ..default()
@@ -541,6 +545,8 @@ fn spawn_btn<F: FnOnce(&mut ChildSpawnerCommands)>(
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 border: UiRect::all(Val::Px(1.0)),
+                column_gap: Val::Px(6.0),
+                flex_direction: FlexDirection::Row,
                 ..default()
             },
             BackgroundColor(bg_color),
@@ -549,14 +555,59 @@ fn spawn_btn<F: FnOnce(&mut ChildSpawnerCommands)>(
         .with_children(spawn_content);
 }
 
-fn spawn_wind_btn(parent: &mut ChildSpawnerCommands, text: &str, dir: Vec2) {
+fn spawn_tool_btn(
+    parent: &mut ChildSpawnerCommands,
+    action: UiAction,
+    bg_color: Color,
+    icon: &'static str,
+    label: &'static str,
+    icon_font: Handle<Font>,
+    text_color: Color,
+) {
+    spawn_btn(parent, action, bg_color, |b| {
+        b.spawn((
+            Text::new(icon),
+            TextFont {
+                font: FontSource::Handle(icon_font),
+                font_size: FontSize::Px(13.5),
+                ..default()
+            },
+            TextColor(text_color),
+        ));
+        b.spawn((
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(11.5),
+                ..default()
+            },
+            TextColor(text_color),
+        ));
+    });
+}
+
+fn spawn_wind_btn(
+    parent: &mut ChildSpawnerCommands,
+    icon: &'static str,
+    label: &'static str,
+    dir: Vec2,
+    icon_font: Handle<Font>,
+) {
     spawn_btn(
         parent,
         UiAction::SetWindDirection(dir),
         Color::srgb(0.14, 0.18, 0.24),
         |b| {
             b.spawn((
-                Text::new(text),
+                Text::new(icon),
+                TextFont {
+                    font: FontSource::Handle(icon_font),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.8, 0.85, 0.95)),
+            ));
+            b.spawn((
+                Text::new(label),
                 TextFont {
                     font_size: FontSize::Px(11.0),
                     ..default()
@@ -667,7 +718,7 @@ pub fn update_ui_labels(
             }
             UiTextRole::StatsBody => {
                 text.0 = format!(
-                    "Active Flames: {} | Max Temp: {:.1}°C | Water Deluge: {:.0} L | Burnt Out: {}",
+                    "Active Flames: {} | Max Temp: {:.1} deg C | Water Deluge: {:.0} L | Burnt Out: {}",
                     stats.active_fires,
                     stats.max_temperature,
                     stats.water_used_liters,
@@ -689,21 +740,21 @@ pub fn update_ui_labels(
             }
             UiTextRole::WindStatus => {
                 let dir_name = if env.wind_direction.x > 0.4 && env.wind_direction.y.abs() < 0.4 {
-                    "East (→)"
+                    "East (->)"
                 } else if env.wind_direction.x < -0.4 && env.wind_direction.y.abs() < 0.4 {
-                    "West (←)"
+                    "West (<-)"
                 } else if env.wind_direction.y < -0.4 && env.wind_direction.x.abs() < 0.4 {
-                    "North (↑)"
+                    "North (^)"
                 } else if env.wind_direction.y > 0.4 && env.wind_direction.x.abs() < 0.4 {
-                    "South (↓)"
+                    "South (v)"
                 } else if env.wind_direction.x > 0.0 && env.wind_direction.y < 0.0 {
-                    "North-East (↗)"
+                    "North-East (->^)"
                 } else if env.wind_direction.x > 0.0 && env.wind_direction.y > 0.0 {
-                    "South-East (↘)"
+                    "South-East (->v)"
                 } else if env.wind_direction.x < 0.0 && env.wind_direction.y < 0.0 {
-                    "North-West (↖)"
+                    "North-West (<-^)"
                 } else {
-                    "South-West (↙)"
+                    "South-West (<-v)"
                 };
                 text.0 = format!("Wind: {} ({:.1} m/s)", dir_name, env.wind_speed);
             }
@@ -726,19 +777,19 @@ pub fn update_ui_labels(
             }
             UiTextRole::PressureBtn => {
                 if interaction.water_hose_pressure > 2.0 {
-                    text.0 = "  Water: Deluge (High)".to_string();
+                    text.0 = "Water: Deluge (High)".to_string();
                     color.0 = Color::srgb(0.4, 0.85, 1.0);
                 } else {
-                    text.0 = "  Water: Standard Stream".to_string();
+                    text.0 = "Water: Standard Stream".to_string();
                     color.0 = Color::srgb(0.8, 0.88, 0.95);
                 }
             }
             UiTextRole::HeatmapBtn => {
                 if env.heatmap_mode {
-                    text.0 = "📷 View: Thermal FLIR (Heatmap)".to_string();
+                    text.0 = "View: Thermal FLIR (Heatmap)".to_string();
                     color.0 = Color::srgb(1.0, 0.4, 0.9);
                 } else {
-                    text.0 = "📷 View: Photorealistic (PBR)".to_string();
+                    text.0 = "View: Photorealistic (PBR)".to_string();
                     color.0 = Color::srgb(0.8, 0.9, 1.0);
                 }
             }

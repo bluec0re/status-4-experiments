@@ -101,7 +101,7 @@ fn handle_mouse_tools(
 
     if let Some(comb) = closest_hover {
         stats.hovered_info = Some(format!(
-            "Target: {} | Temp: {:.1}°C | Moisture: {:.0}% | Fuel: {:.0}/{:.0} | State: {}",
+            "Target: {} | Temp: {:.1} deg C | Moisture: {:.0}% | Fuel: {:.0}/{:.0} | State: {}",
             comb.element_kind.name(),
             comb.temperature,
             comb.moisture * 100.0,
