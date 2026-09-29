@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "fire",
+    "houses",
+    "roads",
+]
+resolver = "2"

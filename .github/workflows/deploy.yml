@@ -40,7 +40,7 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: |
           # Query exact wasm-bindgen crate version from Cargo metadata or lockfile
-          WASM_BINDGEN_VER=$(cargo metadata --format-version 1 --manifest-path roads/Cargo.toml | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version' | head -n 1)
+          WASM_BINDGEN_VER=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="wasm-bindgen") | .version' | head -n 1)
           if [ -z "$WASM_BINDGEN_VER" ] || [ "$WASM_BINDGEN_VER" = "null" ]; then
             WASM_BINDGEN_VER="0.2.129"
           fi
@@ -78,12 +78,8 @@ jobs:
               --target wasm32-unknown-unknown \
               --features bevy/web
 
-            # Locate compiled wasm binary (handles per-package or workspace target dir)
-            WASM_PATH="$exp/target/wasm32-unknown-unknown/release/$BIN_NAME.wasm"
-            if [ ! -f "$WASM_PATH" ]; then
-              WASM_PATH="target/wasm32-unknown-unknown/release/$BIN_NAME.wasm"
-            fi
-
+            # Locate compiled wasm binary in the workspace target directory
+            WASM_PATH="target/wasm32-unknown-unknown/release/$BIN_NAME.wasm"
             if [ ! -f "$WASM_PATH" ]; then
               echo "Error: compiled wasm file not found at $WASM_PATH"
               exit 1
