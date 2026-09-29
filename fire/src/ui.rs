@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use crate::fire_sim::{EnvironmentConditions, SimulationStats, TimeOfDay};
 use crate::interaction::{InteractionState, ToolMode};
@@ -9,7 +10,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui)
+        app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_systems(Startup, setup_ui)
             .add_systems(Update, (handle_ui_buttons, update_ui_labels));
     }
 }
@@ -26,6 +28,7 @@ pub enum UiTextRole {
     PressureBtn,
     HeatmapBtn,
     HoverInfo,
+    FpsStatus,
 }
 
 /// Interactive button actions
@@ -182,6 +185,30 @@ pub fn setup_ui(mut commands: Commands) {
                                     ..default()
                                 },
                                 TextColor(Color::srgb(1.0, 0.7, 0.7)),
+                            ));
+                        });
+
+                        // FPS Badge
+                        row.spawn((
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                border: UiRect::all(Val::Px(1.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.08, 0.12, 0.18, 0.85)),
+                            BorderColor::all(Color::srgba(0.25, 0.45, 0.35, 0.5)),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((
+                                UiTextRole::FpsStatus,
+                                Text::new("FPS: -- (0.0 ms)"),
+                                TextFont {
+                                    font_size: FontSize::Px(11.5),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.45, 0.90, 0.55)),
                             ));
                         });
                     });
@@ -625,10 +652,19 @@ pub fn update_ui_labels(
     env: Res<EnvironmentConditions>,
     stats: Res<SimulationStats>,
     interaction: Res<InteractionState>,
+    diagnostics: Res<DiagnosticsStore>,
     mut query: Query<(&UiTextRole, &mut Text, &mut TextColor)>,
 ) {
     for (role, mut text, mut color) in query.iter_mut() {
         match role {
+            UiTextRole::FpsStatus => {
+                if let Some(fps_diag) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+                    if let Some(fps) = fps_diag.smoothed().or_else(|| fps_diag.average()).or_else(|| fps_diag.value()) {
+                        let frame_time_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+                        text.0 = format!("FPS: {:>3.0} ({:.1} ms)", fps, frame_time_ms);
+                    }
+                }
+            }
             UiTextRole::StatsBody => {
                 text.0 = format!(
                     "Active Flames: {} | Max Temp: {:.1}°C | Water Deluge: {:.0} L | Burnt Out: {}",

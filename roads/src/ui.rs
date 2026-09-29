@@ -1,6 +1,7 @@
 use crate::editor::{EditorAction, EditorSet, EditorState, EditorTool, WidthMode};
 use crate::road::detect_junctions;
 use crate::terrain::{HeightmapData, WATER_THRESHOLD};
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::*;
 
@@ -8,18 +9,24 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui).add_systems(
-            Update,
-            (
-                handle_button_clicks.in_set(EditorSet::Input),
-                update_ui_system
-                    .in_set(EditorSet::PostUpdate)
-                    .run_if(resource_changed::<EditorState>),
-                update_wireframe_ui_text,
-            ),
-        );
+        app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_systems(Startup, setup_ui)
+            .add_systems(
+                Update,
+                (
+                    handle_button_clicks.in_set(EditorSet::Input),
+                    update_ui_system
+                        .in_set(EditorSet::PostUpdate)
+                        .run_if(resource_changed::<EditorState>),
+                    update_wireframe_ui_text,
+                    update_fps_text,
+                ),
+            );
     }
 }
+
+#[derive(Component)]
+pub struct FpsTextMarker;
 
 #[derive(Component)]
 pub struct StatsTextMarker;
@@ -135,6 +142,17 @@ pub fn setup_ui(mut commands: Commands) {
                                 ..default()
                             },
                             TextColor(Color::srgb(0.55, 0.65, 0.75)),
+                        ));
+
+                        // Dynamic FPS Line
+                        card.spawn((
+                            Text::new("FPS: -- (0.0 ms)"),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.45, 0.90, 0.55)),
+                            FpsTextMarker,
                         ));
 
                         // Dynamic Stats Line
@@ -921,6 +939,20 @@ pub fn update_wireframe_ui_text(
         };
         if text.0 != label {
             text.0 = label.to_string();
+        }
+    }
+}
+
+pub fn update_fps_text(
+    diagnostics: Res<DiagnosticsStore>,
+    mut fps_query: Query<&mut Text, With<FpsTextMarker>>,
+) {
+    if let Some(fps_diag) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(fps) = fps_diag.smoothed().or_else(|| fps_diag.average()).or_else(|| fps_diag.value()) {
+            let frame_time_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+            for mut text in &mut fps_query {
+                text.0 = format!("FPS: {:>3.0} ({:.1} ms)", fps, frame_time_ms);
+            }
         }
     }
 }

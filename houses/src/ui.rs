@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
-use bevy::prelude::*;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::pbr::wireframe::WireframeConfig;
+use bevy::prelude::*;
 use crate::generator::{
     GeneratorSettings, GeneratorStats, HouseAction, HouseSet, UnitOrder,
 };
@@ -12,7 +13,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui)
+        app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+            .add_systems(Startup, setup_ui)
             .add_systems(
                 Update,
                 (
@@ -27,6 +29,7 @@ impl Plugin for UiPlugin {
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UiTextRole {
     StatsInfo,
+    FpsInfo,
     PresetBtn,
     StyleBtn,
     StoriesBtn,
@@ -114,6 +117,17 @@ pub fn setup_ui(mut commands: Commands) {
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.3, 0.4, 0.5, 0.3)),
+                        ));
+
+                        // Dynamic FPS text
+                        card.spawn((
+                            UiTextRole::FpsInfo,
+                            Text::new("FPS: -- (0.0 ms)"),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.45, 0.90, 0.55)),
                         ));
 
                         // Dynamic stats text
@@ -528,6 +542,7 @@ pub fn update_ui_labels(
     selection: Res<RtsSelectionState>,
     units: Query<(Entity, &RtsUnit, &BuildingOccupant)>,
     wireframe_config: Option<Res<WireframeConfig>>,
+    diagnostics: Res<DiagnosticsStore>,
     mut text_query: Query<(&mut Text, &UiTextRole)>,
 ) {
     let mut unit_status = "No unit selected".to_string();
@@ -546,6 +561,14 @@ pub fn update_ui_labels(
 
     for (mut text, role) in &mut text_query {
         match role {
+            UiTextRole::FpsInfo => {
+                if let Some(fps_diag) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) {
+                    if let Some(fps) = fps_diag.smoothed().or_else(|| fps_diag.average()).or_else(|| fps_diag.value()) {
+                        let frame_time_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+                        *text = Text::new(format!("FPS: {:>3.0} ({:.1} ms)", fps, frame_time_ms));
+                    }
+                }
+            }
             UiTextRole::StatsInfo => {
                 *text = Text::new(format!(
                     "Seed: {}\nParcel Area: {:.0} m^2 (Perimeter: {} edges)\nTotal Floor Area: {:.0} m^2\nBuilding Height: {:.1} m\nInternal Rooms: {}\nWindows: {}  |  Doorways: {}",
