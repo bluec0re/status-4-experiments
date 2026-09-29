@@ -6,6 +6,7 @@ mod terrain;
 mod ui;
 mod vegetation;
 
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
 use camera::CameraPlugin;
 use editor::RoadEditorPlugin;
@@ -23,6 +24,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(WireframePlugin::default())
         .add_plugins((
             CameraPlugin,
             TerrainPlugin,
@@ -30,5 +32,15 @@ fn main() {
             VegetationPlugin,
             UiPlugin,
         ))
+        .add_systems(Update, toggle_wireframe)
         .run();
+}
+
+fn toggle_wireframe(
+    mut config: ResMut<WireframeConfig>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    if keys.just_pressed(KeyCode::KeyZ) {
+        config.global = !config.global;
+    }
 }

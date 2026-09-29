@@ -16,6 +16,8 @@ use generator::HouseGeneratorPlugin;
 use rts::RtsPlugin;
 use ui::UiPlugin;
 
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -26,6 +28,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(WireframePlugin::default())
         .add_plugins((
             CameraPlugin,
             EnvironmentPlugin,
@@ -33,5 +36,15 @@ fn main() {
             RtsPlugin,
             UiPlugin,
         ))
+        .add_systems(Update, toggle_wireframe)
         .run();
+}
+
+fn toggle_wireframe(
+    mut config: ResMut<WireframeConfig>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    if keys.just_pressed(KeyCode::KeyZ) {
+        config.global = !config.global;
+    }
 }

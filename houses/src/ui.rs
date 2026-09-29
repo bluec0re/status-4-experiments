@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use bevy::prelude::*;
+use bevy::pbr::wireframe::WireframeConfig;
 use crate::generator::{
     GeneratorSettings, GeneratorStats, HouseAction, HouseSet, UnitOrder,
 };
@@ -32,6 +33,7 @@ pub enum UiTextRole {
     InteriorBtn,
     CutawayBtn,
     UnitStatus,
+    WireframeBtn,
 }
 
 // Button Action Markers
@@ -46,6 +48,7 @@ pub enum UiAction {
     CycleCutaway,
     SelectUnit(u32),
     OrderUnit(UnitOrder),
+    ToggleWireframe,
 }
 
 pub fn setup_ui(mut commands: Commands) {
@@ -263,6 +266,24 @@ pub fn setup_ui(mut commands: Commands) {
                             },
                         );
 
+                        // Wireframe Toggle Button
+                        spawn_button(
+                            card,
+                            UiAction::ToggleWireframe,
+                            Color::srgb(0.18, 0.22, 0.28),
+                            |btn| {
+                                btn.spawn((
+                                    UiTextRole::WireframeBtn,
+                                    Text::new("[Z] Wireframe: OFF"),
+                                    TextFont {
+                                        font_size: FontSize::Px(12.0),
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.8, 0.9, 1.0)),
+                                ));
+                            },
+                        );
+
                         // Randomize Seed Button
                         spawn_button(
                             card,
@@ -463,6 +484,7 @@ pub fn handle_ui_buttons(
     mut action_writer: MessageWriter<HouseAction>,
     mut selection: ResMut<RtsSelectionState>,
     units: Query<(Entity, &RtsUnit)>,
+    mut wireframe_config: Option<ResMut<WireframeConfig>>,
 ) {
     for (interaction, action, _bg) in &interaction_query {
         if *interaction == Interaction::Pressed {
@@ -485,6 +507,11 @@ pub fn handle_ui_buttons(
                 UiAction::OrderUnit(order) => {
                     action_writer.write(HouseAction::DispatchUnitOrder(*order));
                 }
+                UiAction::ToggleWireframe => {
+                    if let Some(ref mut config) = wireframe_config {
+                        config.global = !config.global;
+                    }
+                }
             }
         }
     }
@@ -499,6 +526,7 @@ pub fn update_ui_labels(
     stats: Res<GeneratorStats>,
     selection: Res<RtsSelectionState>,
     units: Query<(Entity, &RtsUnit, &BuildingOccupant)>,
+    wireframe_config: Option<Res<WireframeConfig>>,
     mut text_query: Query<(&mut Text, &UiTextRole)>,
 ) {
     let mut unit_status = "No unit selected".to_string();
@@ -551,6 +579,14 @@ pub fn update_ui_labels(
             }
             UiTextRole::UnitStatus => {
                 *text = Text::new(unit_status.clone());
+            }
+            UiTextRole::WireframeBtn => {
+                let is_on = wireframe_config.as_ref().map_or(false, |c| c.global);
+                *text = Text::new(if is_on {
+                    "[Z] Wireframe: ON"
+                } else {
+                    "[Z] Wireframe: OFF"
+                });
             }
         }
     }

@@ -1,6 +1,7 @@
 use crate::editor::{EditorAction, EditorSet, EditorState, EditorTool, WidthMode};
 use crate::road::detect_junctions;
 use crate::terrain::{HeightmapData, WATER_THRESHOLD};
+use bevy::pbr::wireframe::WireframeConfig;
 use bevy::prelude::*;
 
 pub struct UiPlugin;
@@ -14,6 +15,7 @@ impl Plugin for UiPlugin {
                 update_ui_system
                     .in_set(EditorSet::PostUpdate)
                     .run_if(resource_changed::<EditorState>),
+                update_wireframe_ui_text,
             ),
         );
     }
@@ -66,6 +68,12 @@ pub struct JunctionStyleBtnMarker;
 
 #[derive(Component)]
 pub struct JunctionStyleBtnTextMarker;
+
+#[derive(Component)]
+pub struct WireframeBtnMarker;
+
+#[derive(Component)]
+pub struct WireframeBtnTextMarker;
 
 pub fn setup_ui(mut commands: Commands) {
     // Root container
@@ -323,7 +331,7 @@ pub fn setup_ui(mut commands: Commands) {
                                         ));
                                     });
 
-                                // Clear Road button
+                                 // Clear Road button
                                 btn_row
                                     .spawn((
                                         Button,
@@ -344,6 +352,31 @@ pub fn setup_ui(mut commands: Commands) {
                                                 ..default()
                                             },
                                             TextColor(Color::WHITE),
+                                        ));
+                                    });
+
+                                // Wireframe toggle button
+                                btn_row
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.18, 0.22, 0.28, 0.9)),
+                                        BorderColor::all(Color::srgba(0.4, 0.6, 0.8, 0.6)),
+                                        WireframeBtnMarker,
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            Text::new("Wireframe (Z)"),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.5),
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.8, 0.9, 1.0)),
+                                            WireframeBtnTextMarker,
                                         ));
                                     });
                             });
@@ -552,7 +585,7 @@ pub fn setup_ui(mut commands: Commands) {
                 ));
 
                 let controls = [
-                    "• WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
+                    "• Z: Toggle Wireframe Overlay  |  WASD / Middle Mouse Drag: Pan Camera  |  Right Mouse Drag / Q, E: Orbit View",
                     "• Mouse Scroll: Zoom In / Out (Tracks landscape height smoothly)",
                     "• Left Click: Select Node / Add Node (T to toggle tool) | Drag: Move along ground",
                     "• N: New Street  |  Click existing node in Add mode to branch / join into a Junction",
@@ -807,9 +840,11 @@ pub fn handle_button_clicks(
             Option<&JoinBtnMarker>,
             Option<&CycleStreetBtnMarker>,
             Option<&JunctionStyleBtnMarker>,
+            Option<&WireframeBtnMarker>,
         ),
         (Changed<Interaction>, With<Button>),
     >,
+    mut wireframe_config: Option<ResMut<WireframeConfig>>,
 ) {
     for (
         interaction,
@@ -825,6 +860,7 @@ pub fn handle_button_clicks(
         join_btn,
         cycle_btn,
         junc_style_btn,
+        wireframe_btn,
     ) in interaction_query.iter_mut()
     {
         match *interaction {
@@ -852,6 +888,10 @@ pub fn handle_button_clicks(
                     action_writer.write(EditorAction::CycleActiveStreet);
                 } else if junc_style_btn.is_some() {
                     action_writer.write(EditorAction::CycleJunctionStyle);
+                } else if wireframe_btn.is_some() {
+                    if let Some(ref mut config) = wireframe_config {
+                        config.global = !config.global;
+                    }
                 }
             }
             Interaction::Hovered => {
@@ -860,6 +900,23 @@ pub fn handle_button_clicks(
             Interaction::None => {
                 // Handled in update_ui_system based on state
             }
+        }
+    }
+}
+
+pub fn update_wireframe_ui_text(
+    wireframe_config: Option<Res<WireframeConfig>>,
+    mut query: Query<&mut Text, With<WireframeBtnTextMarker>>,
+) {
+    let is_on = wireframe_config.as_ref().map_or(false, |c| c.global);
+    for mut text in query.iter_mut() {
+        let label = if is_on {
+            "Wireframe: ON (Z)"
+        } else {
+            "Wireframe: OFF (Z)"
+        };
+        if text.0 != label {
+            text.0 = label.to_string();
         }
     }
 }
