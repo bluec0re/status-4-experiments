@@ -64,8 +64,14 @@ jobs:
             echo "Building experiment: $exp"
             echo "=================================================="
 
-            PKG_NAME=$(cargo metadata --format-version 1 --manifest-path "$exp/Cargo.toml" --no-deps | jq -r '.packages[0].name')
-            BIN_NAME=$(cargo metadata --format-version 1 --manifest-path "$exp/Cargo.toml" --no-deps | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name' | head -n 1)
+            # Query package info for this specific experiment directory
+            PKG_JSON=$(cargo read-manifest --manifest-path "$exp/Cargo.toml" 2>/dev/null)
+            if [ -z "$PKG_JSON" ] || [ "$PKG_JSON" = "null" ]; then
+              PKG_JSON=$(cargo metadata --format-version 1 --no-deps | jq -c --arg exp "$exp" '.packages[] | select(.manifest_path | test("/" + $exp + "/Cargo\\.toml$"))' | head -n 1)
+            fi
+
+            PKG_NAME=$(echo "$PKG_JSON" | jq -r '.name // empty')
+            BIN_NAME=$(echo "$PKG_JSON" | jq -r '.targets[]? | select(.kind[]=="bin") | .name' | head -n 1)
             if [ -z "$BIN_NAME" ] || [ "$BIN_NAME" = "null" ]; then
               BIN_NAME="$PKG_NAME"
             fi
