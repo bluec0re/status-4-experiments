@@ -25,6 +25,12 @@ impl Plugin for FireSimPlugin {
     }
 }
 
+/// Global adjustable factor controlling fire propagation speed.
+/// Values < 1.0 make fire spread slower and more gradual, allowing more time
+/// to observe thermal dynamics and use firefighting tools.
+/// 1.0 = baseline propagation rate, 0.4 = ~2.5x slower propagation.
+pub const FIRE_PROPAGATION_SPEED_FACTOR: f32 = 0.4;
+
 /// Time of day lighting preset
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum TimeOfDay {
@@ -303,9 +309,9 @@ fn simulate_heat_transfer(
             }
         }
 
-        // Apply thermal conductivity and insulation
+        // Apply thermal conductivity and insulation scaled by propagation speed factor
         let conductivity = comb.material.thermal_conductivity();
-        let net_heat_gain = thermal_intake * conductivity * dt;
+        let net_heat_gain = thermal_intake * conductivity * dt * FIRE_PROPAGATION_SPEED_FACTOR;
 
         // Latent heat: if element has moisture, heat boils water instead of raising temp above 100 deg C
         if comb.moisture > 0.01 && comb.temperature > 80.0 {
@@ -367,15 +373,15 @@ fn update_combustion_and_fuel(
             let target_burn_temp = 850.0 + comb.material.heat_output() * 0.8;
             comb.temperature = comb.temperature.lerp(target_burn_temp, (3.5 * dt).min(1.0));
 
-            // Ramp up flame intensity
-            comb.flame_intensity = (comb.flame_intensity + 1.2 * dt).min(1.0);
+            // Ramp up flame intensity scaled by propagation speed factor
+            comb.flame_intensity = (comb.flame_intensity + (1.2 * FIRE_PROPAGATION_SPEED_FACTOR) * dt).min(1.0);
 
             // Fuel burnoff
             let fuel_consumed = comb.material.burn_rate() * comb.flame_intensity * dt;
             comb.fuel -= fuel_consumed;
 
-            // Airborne ember generation
-            let ember_rate = comb.material.ember_emission_rate() * comb.flame_intensity;
+            // Airborne ember generation scaled by propagation speed factor
+            let ember_rate = comb.material.ember_emission_rate() * comb.flame_intensity * FIRE_PROPAGATION_SPEED_FACTOR;
             if ember_rate > 0.0 && fastrand_chance(ember_rate * dt * 0.6) && embers.embers.len() < 120 {
                 let pos = gt.translation() + Vec3::new(0.0, comb.bounding_size.y * 0.5, 0.0);
                 let wind_3d = Vec3::new(
@@ -456,7 +462,7 @@ fn simulate_airborne_embers(
             let dist = ember.pos.distance(target_pos);
             if dist < threshold {
                 if let Ok((_ent, _gt, mut comb)) = query.get_mut(target_ent) {
-                    comb.temperature += 65.0;
+                    comb.temperature += 65.0 * FIRE_PROPAGATION_SPEED_FACTOR;
                     if comb.temperature >= comb.material.ignition_temperature() && comb.moisture < 0.12 {
                         comb.ignite();
                     }
