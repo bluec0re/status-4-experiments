@@ -97,7 +97,6 @@ jobs:
             echo "Running wasm-bindgen into $EXP_SITE..."
             wasm-bindgen \
               --target web \
-              -Os \
               --no-typescript \
               --out-dir "$EXP_SITE" \
               --out-name "$BIN_NAME" \
