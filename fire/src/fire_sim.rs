@@ -62,6 +62,7 @@ pub struct EnvironmentConditions {
     pub sim_paused: bool,
     pub time_of_day: TimeOfDay,
     pub heatmap_mode: bool,   // Thermal FLIR camera view
+    pub fire_shadows: bool,   // Dynamic fire point light shadow maps toggle
 }
 
 impl Default for EnvironmentConditions {
@@ -74,6 +75,7 @@ impl Default for EnvironmentConditions {
             sim_paused: false,
             time_of_day: TimeOfDay::Night, // Night by default to wow user with fire light casting!
             heatmap_mode: false,
+            fire_shadows: false, // Disabled by default for fast performance
         }
     }
 }
@@ -180,8 +182,51 @@ pub struct EmberContainer {
     pub embers: Vec<AirborneEmber>,
 }
 
+/// Compute heat absorption for an element from candidate nearby burning sources
+fn compute_heat_intake(
+    pos: Vec3,
+    comb_temp: f32,
+    sources: &[(Vec3, f32, f32, MaterialType)],
+    indices: &[usize],
+    wind_dir: Vec2,
+    wind_speed: f32,
+    max_reach_sq: f32,
+) -> f32 {
+    let mut thermal = 0.0f32;
+    for &idx in indices {
+        let (src_pos, src_temp, src_flame, src_mat) = sources[idx];
+        let delta = pos - src_pos;
+        let dist_sq = delta.length_squared();
+        if dist_sq < 0.04 || dist_sq > max_reach_sq {
+            continue;
+        }
+
+        let dist = dist_sq.sqrt();
+        let delta_dir = delta / dist;
+        let delta_xz = Vec2::new(delta_dir.x, delta_dir.z);
+
+        // A. Convection: hot air rises (updraft) AND is pushed downwind
+        let updraft = delta_dir.y.max(0.0) * 1.8;
+        let downwind_dot = delta_xz.dot(wind_dir);
+        let wind_convection = (downwind_dot.max(0.0) * (wind_speed * 0.28 + 0.15))
+            / (1.0 + dist * 0.25);
+        let convection = updraft + wind_convection;
+
+        // B. Thermal Radiation: Stefan-Boltzmann inspired flux falling off with distance
+        let radiation = 1.0 / (dist_sq * 0.4 + 1.0);
+
+        // Combined heat transfer coefficient
+        let heat_potency = src_mat.heat_output() * src_flame;
+        let transfer_amount = heat_potency * (radiation * 1.2 + convection * 2.2);
+
+        let temp_gradient = (src_temp - comb_temp).max(0.0);
+        thermal += (transfer_amount * (temp_gradient / 600.0)).min(350.0);
+    }
+    thermal
+}
+
 /// Step 1: Heat Transfer Simulation
-/// Computes conduction, convection carried by wind, and radiant thermal flux
+/// Computes conduction, convection carried by wind, and radiant thermal flux using spatial partitioning
 fn simulate_heat_transfer(
     time: Res<Time>,
     env: Res<EnvironmentConditions>,
@@ -206,7 +251,29 @@ fn simulate_heat_transfer(
         }
     }
 
-    // Apply heat from sources to all elements
+    if sources.is_empty() {
+        // Fast path: only ambient cooling if no fires active
+        for (_gt, mut comb) in query.iter_mut() {
+            let ambient_diff = comb.temperature - env.ambient_temp;
+            comb.temperature -= ambient_diff * 0.35 * dt;
+        }
+        return;
+    }
+
+    // Partition heat sources into spatial grid cells (size 30m covers max reach)
+    const CELL_SIZE: f32 = 30.0;
+    let mut grid: std::collections::HashMap<(i32, i32), Vec<usize>> = std::collections::HashMap::new();
+    for (idx, &(pos, _, _, _)) in sources.iter().enumerate() {
+        let cx = (pos.x / CELL_SIZE).floor() as i32;
+        let cz = (pos.z / CELL_SIZE).floor() as i32;
+        grid.entry((cx, cz)).or_default().push(idx);
+    }
+
+    let max_reach = 18.0 + env.wind_speed * 0.4;
+    let max_reach_sq = max_reach * max_reach;
+    let wind_dir = env.wind_direction.normalize_or_zero();
+
+    // Apply heat from neighboring cells to all elements
     for (gt, mut comb) in query.iter_mut() {
         let pos = gt.translation();
 
@@ -215,44 +282,25 @@ fn simulate_heat_transfer(
         let cool_rate = if comb.is_burning { 0.05 } else { 0.35 };
         comb.temperature -= ambient_diff * cool_rate * dt;
 
-        // 2. Heat absorption from all active fire sources
+        // 2. Heat absorption from nearby fire source cells only
+        let cx = (pos.x / CELL_SIZE).floor() as i32;
+        let cz = (pos.z / CELL_SIZE).floor() as i32;
         let mut thermal_intake = 0.0f32;
 
-        for &(src_pos, src_temp, src_flame, src_mat) in &sources {
-            let delta = pos - src_pos;
-            let dist_sq = delta.length_squared();
-            let dist = dist_sq.sqrt();
-
-            if dist < 0.2 {
-                continue; // Self or overlapping
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                if let Some(cell_indices) = grid.get(&(cx + dx, cz + dz)) {
+                    thermal_intake += compute_heat_intake(
+                        pos,
+                        comb.temperature,
+                        &sources,
+                        cell_indices,
+                        wind_dir,
+                        env.wind_speed,
+                        max_reach_sq,
+                    );
+                }
             }
-
-            // Max effective interaction distance
-            let max_reach = 18.0 + env.wind_speed * 0.4;
-            if dist > max_reach {
-                continue;
-            }
-
-            let delta_dir = delta / dist;
-            let delta_xz = Vec2::new(delta_dir.x, delta_dir.z);
-
-            // A. Convection: hot air rises (updraft) AND is pushed downwind
-            let updraft = (delta_dir.y).max(0.0) * 1.8;
-            let downwind_dot = delta_xz.dot(env.wind_direction.normalize_or_zero());
-            let wind_convection = (downwind_dot.max(0.0) * (env.wind_speed * 0.28 + 0.15))
-                / (1.0 + dist * 0.25);
-
-            let convection = updraft + wind_convection;
-
-            // B. Thermal Radiation: Stefan-Boltzmann inspired flux falling off with distance
-            let radiation = 1.0 / (dist_sq * 0.4 + 1.0);
-
-            // Combined heat transfer coefficient
-            let heat_potency = src_mat.heat_output() * src_flame;
-            let transfer_amount = heat_potency * (radiation * 1.2 + convection * 2.2);
-
-            let temp_gradient = (src_temp - comb.temperature).max(0.0);
-            thermal_intake += (transfer_amount * (temp_gradient / 600.0)).min(350.0);
         }
 
         // Apply thermal conductivity and insulation
@@ -328,7 +376,7 @@ fn update_combustion_and_fuel(
 
             // Airborne ember generation
             let ember_rate = comb.material.ember_emission_rate() * comb.flame_intensity;
-            if ember_rate > 0.0 && fastrand_chance(ember_rate * dt * 0.6) {
+            if ember_rate > 0.0 && fastrand_chance(ember_rate * dt * 0.6) && embers.embers.len() < 120 {
                 let pos = gt.translation() + Vec3::new(0.0, comb.bounding_size.y * 0.5, 0.0);
                 let wind_3d = Vec3::new(
                     env.wind_direction.x * env.wind_speed,
@@ -366,14 +414,23 @@ fn simulate_airborne_embers(
     time: Res<Time>,
     env: Res<EnvironmentConditions>,
     mut embers: ResMut<EmberContainer>,
-    mut query: Query<(&GlobalTransform, &mut Combustible)>,
+    mut query: Query<(Entity, &GlobalTransform, &mut Combustible)>,
 ) {
-    if env.sim_paused || env.sim_speed <= 0.0 {
+    if env.sim_paused || env.sim_speed <= 0.0 || embers.embers.is_empty() {
         return;
     }
 
     let dt = (time.delta_secs() * env.sim_speed).min(0.1);
     let gravity = Vec3::new(0.0, -1.8, 0.0);
+
+    // Collect eligible ignition targets first (elements that are not already burning or burnt out)
+    let mut targets: Vec<(Entity, Vec3, f32)> = Vec::new();
+    for (ent, gt, comb) in query.iter() {
+        if !comb.burnout && !comb.is_burning && comb.material.is_combustible() {
+            let threshold = comb.bounding_size.length() * 0.6 + 0.5;
+            targets.push((ent, gt.translation(), threshold));
+        }
+    }
 
     embers.embers.retain_mut(|ember| {
         ember.life += dt;
@@ -385,26 +442,24 @@ fn simulate_airborne_embers(
         ember.vel += gravity * dt;
         ember.pos += ember.vel * dt;
 
-        // Check if ember hit the ground or an element
+        // Check if ember hit the ground
         if ember.pos.y <= 0.1 {
-            // Hit ground, extinguish
             return false;
         }
 
-        // Spot ignition check against combustible elements
-        for (gt, mut comb) in query.iter_mut() {
-            if comb.burnout || comb.is_burning || !comb.material.is_combustible() {
-                continue;
-            }
+        if targets.is_empty() {
+            return true;
+        }
 
-            let dist = ember.pos.distance(gt.translation());
-            let threshold = comb.bounding_size.length() * 0.6 + 0.5;
-
+        // Spot ignition check against unignited targets
+        for &(target_ent, target_pos, threshold) in &targets {
+            let dist = ember.pos.distance(target_pos);
             if dist < threshold {
-                // Ember touches element: injects intense spark heat!
-                comb.temperature += 65.0;
-                if comb.temperature >= comb.material.ignition_temperature() && comb.moisture < 0.12 {
-                    comb.ignite();
+                if let Ok((_ent, _gt, mut comb)) = query.get_mut(target_ent) {
+                    comb.temperature += 65.0;
+                    if comb.temperature >= comb.material.ignition_temperature() && comb.moisture < 0.12 {
+                        comb.ignite();
+                    }
                 }
                 return false; // Ember consumed
             }
@@ -414,61 +469,72 @@ fn simulate_airborne_embers(
     });
 }
 
+/// Computes the target base color and emissive glow for a combustible element
+fn compute_element_colors(comb: &Combustible, heatmap_mode: bool) -> (Color, LinearRgba) {
+    if heatmap_mode {
+        let flir = temperature_to_flir_color(comb.temperature);
+        (flir, LinearRgba::from(flir) * 0.4)
+    } else if comb.burnout {
+        (comb.material.charred_color(), LinearRgba::BLACK)
+    } else if comb.shattered && comb.material == MaterialType::GlassWindow {
+        (Color::srgba(0.12, 0.12, 0.12, 0.15), LinearRgba::BLACK)
+    } else if comb.is_burning {
+        let burn_fraction = 1.0 - (comb.fuel / comb.max_fuel.max(1.0));
+        let charred = comb.material.charred_color();
+        let base = comb.original_base_color;
+        let blended = base.mix(&charred, burn_fraction.clamp(0.0, 1.0));
+        let heat_glow = Color::srgb(1.0, 0.35, 0.05);
+        let emissive = LinearRgba::from(heat_glow) * (comb.flame_intensity * 1.5);
+        (blended, emissive)
+    } else {
+        let heat_ratio = ((comb.temperature - 100.0) / 400.0).clamp(0.0, 1.0);
+        if heat_ratio > 0.05 {
+            let scorched = Color::srgb(0.25, 0.18, 0.12);
+            let blended = comb.original_base_color.mix(&scorched, heat_ratio * 0.85);
+            let emissive = LinearRgba::from(Color::srgb(1.0, 0.2, 0.02)) * (heat_ratio * 0.3);
+            (blended, emissive)
+        } else if comb.moisture > 0.3 {
+            let wet_tint = comb.original_base_color.mix(&Color::srgb(0.08, 0.10, 0.12), 0.35);
+            (wet_tint, LinearRgba::BLACK)
+        } else {
+            (comb.original_base_color, LinearRgba::BLACK)
+        }
+    }
+}
+
+fn color_difference_significant(a: Color, b: Color) -> bool {
+    let sa = a.to_srgba();
+    let sb = b.to_srgba();
+    (sa.red - sb.red).abs() > 0.02
+        || (sa.green - sb.green).abs() > 0.02
+        || (sa.blue - sb.blue).abs() > 0.02
+}
+
+fn emissive_difference_significant(a: LinearRgba, b: LinearRgba) -> bool {
+    (a.red - b.red).abs() > 0.02
+        || (a.green - b.green).abs() > 0.02
+        || (a.blue - b.blue).abs() > 0.02
+}
+
 /// Step 4: Visual Material States (Charring, Thermal Heatmap, Window Shattering)
+/// Only mutates material assets when colors change significantly, preventing continuous GPU uniform re-extraction
 fn update_element_visual_states(
     env: Res<EnvironmentConditions>,
-    mut query: Query<(&Combustible, &MeshMaterial3d<StandardMaterial>)>,
+    query: Query<(&Combustible, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (comb, mat_handle) in query.iter_mut() {
-        let Some(mut mat) = materials.get_mut(&mat_handle.0) else {
+    for (comb, mat_handle) in query.iter() {
+        let Some(existing_mat) = materials.get(&mat_handle.0) else {
             continue;
         };
 
-        if env.heatmap_mode {
-            // Thermal FLIR infrared color scale (Ambient=Blue, Warm=Green/Yellow, Blazing=White/Magenta)
-            mat.base_color = temperature_to_flir_color(comb.temperature);
-            mat.emissive = LinearRgba::from(temperature_to_flir_color(comb.temperature)) * 0.4;
-        } else {
-            // Photorealistic visual representation
-            if comb.burnout {
-                // Charred black ash
-                mat.base_color = comb.material.charred_color();
-                mat.emissive = LinearRgba::BLACK;
-            } else if comb.shattered && comb.material == MaterialType::GlassWindow {
-                // Broken jagged pane
-                mat.base_color = Color::srgba(0.12, 0.12, 0.12, 0.15);
-                mat.emissive = LinearRgba::BLACK;
-            } else if comb.is_burning {
-                // Blazing fire: incandescent glowing ember cracks
-                let burn_fraction = 1.0 - (comb.fuel / comb.max_fuel.max(1.0));
-                let charred = comb.material.charred_color();
-                let base = comb.original_base_color;
-                let blended = base.mix(&charred, burn_fraction.clamp(0.0, 1.0));
-                mat.base_color = blended;
+        let (target_color, target_emissive) = compute_element_colors(comb, env.heatmap_mode);
+        let changed = color_difference_significant(existing_mat.base_color, target_color)
+            || emissive_difference_significant(existing_mat.emissive, target_emissive);
 
-                // Glowing thermal emission
-                let heat_glow = Color::srgb(1.0, 0.35, 0.05);
-                mat.emissive = LinearRgba::from(heat_glow) * (comb.flame_intensity * 1.5);
-            } else {
-                // Unburnt or hot smoldering
-                let heat_ratio = ((comb.temperature - 100.0) / 400.0).clamp(0.0, 1.0);
-                if heat_ratio > 0.05 {
-                    // Pre-charring / scorching brown
-                    let scorched = Color::srgb(0.25, 0.18, 0.12);
-                    let blended = comb.original_base_color.mix(&scorched, heat_ratio * 0.85);
-                    mat.base_color = blended;
-                    mat.emissive = LinearRgba::from(Color::srgb(1.0, 0.2, 0.02)) * (heat_ratio * 0.3);
-                } else if comb.moisture > 0.3 {
-                    // Dampened dark surface
-                    let wet_tint = comb.original_base_color.mix(&Color::srgb(0.08, 0.10, 0.12), 0.35);
-                    mat.base_color = wet_tint;
-                    mat.emissive = LinearRgba::BLACK;
-                } else {
-                    mat.base_color = comb.original_base_color;
-                    mat.emissive = LinearRgba::BLACK;
-                }
-            }
+        if changed && let Some(mut mat) = materials.get_mut(&mat_handle.0) {
+            mat.base_color = target_color;
+            mat.emissive = target_emissive;
         }
     }
 }

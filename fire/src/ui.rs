@@ -43,6 +43,7 @@ pub enum UiTextRole {
     SpeedBtn,
     PressureBtn,
     HeatmapBtn,
+    ShadowsBtn,
     HoverInfo,
     FpsStatus,
 }
@@ -54,6 +55,7 @@ pub enum UiAction {
     SelectTool(ToolMode),
     ToggleWaterPressure,
     ToggleHeatmap,
+    ToggleFireShadows,
     SetTimeOfDay(TimeOfDay),
     CycleSimSpeed,
     SetWindDirection(Vec2),
@@ -373,6 +375,33 @@ pub fn setup_ui(mut commands: Commands, icon_font: Res<IconFont>) {
                             ));
                         },
                     );
+
+                    // Dynamic Fire Shadows Toggle
+                    spawn_btn(
+                        card,
+                        UiAction::ToggleFireShadows,
+                        Color::srgb(0.20, 0.20, 0.28),
+                        |b| {
+                            b.spawn((
+                                Text::new("\u{e3a8}"),
+                                TextFont {
+                                    font: FontSource::Handle(icon_font.0.clone()),
+                                    font_size: FontSize::Px(13.5),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.85, 0.85, 1.0)),
+                            ));
+                            b.spawn((
+                                UiTextRole::ShadowsBtn,
+                                Text::new("Fire Shadows: OFF (Fast)"),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.85, 0.85, 1.0)),
+                            ));
+                        },
+                    );
                 });
 
                 // Right Wind Direction & Weather Controller
@@ -665,6 +694,9 @@ pub fn handle_ui_buttons(
                 UiAction::ToggleHeatmap => {
                     env.heatmap_mode = !env.heatmap_mode;
                 }
+                UiAction::ToggleFireShadows => {
+                    env.fire_shadows = !env.fire_shadows;
+                }
                 UiAction::SetTimeOfDay(_) => {
                     env.time_of_day = env.time_of_day.next();
                 }
@@ -791,6 +823,15 @@ pub fn update_ui_labels(
                 } else {
                     text.0 = "View: Photorealistic (PBR)".to_string();
                     color.0 = Color::srgb(0.8, 0.9, 1.0);
+                }
+            }
+            UiTextRole::ShadowsBtn => {
+                if env.fire_shadows {
+                    text.0 = "Fire Shadows: ON (High Quality)".to_string();
+                    color.0 = Color::srgb(1.0, 0.75, 0.4);
+                } else {
+                    text.0 = "Fire Shadows: OFF (Fast)".to_string();
+                    color.0 = Color::srgb(0.5, 0.9, 0.6);
                 }
             }
             UiTextRole::HoverInfo => {

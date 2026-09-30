@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use crate::camera::{raycast_ground_plane, RtsCamera};
 use crate::fire_sim::{Combustible, EmberContainer, SimulationStats, fastrand_chance, fastrand_range};
 use crate::house_compat::BuildingElementKind;
-use crate::rendering::{FireParticle, ParticleType};
+use crate::rendering::{FireParticle, ParticleAssets, ParticleType};
 
 pub struct InteractionPlugin;
 
@@ -63,8 +63,7 @@ fn handle_mouse_tools(
     mut interaction: ResMut<InteractionState>,
     mut stats: ResMut<SimulationStats>,
     mut embers: ResMut<EmberContainer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    particle_assets: Res<ParticleAssets>,
     cam_query: Query<(&Camera, &GlobalTransform, &RtsCamera)>,
     mut comb_query: Query<(Entity, &GlobalTransform, &mut Combustible)>,
 ) {
@@ -143,18 +142,10 @@ fn handle_mouse_tools(
                     let stream_dir = (target_pos - cam_pos).normalize_or_zero();
                     let spawn_pos = cam_pos + stream_dir * 3.5;
 
-                    let water_mesh = meshes.add(Sphere::new(0.22).mesh().ico(0).expect("sphere mesh"));
-                    let water_mat = materials.add(StandardMaterial {
-                        base_color: Color::srgba(0.35, 0.75, 1.0, 0.7),
-                        perceptual_roughness: 0.1,
-                        unlit: true,
-                        ..default()
-                    });
-
                     // Water stream droplet
                     commands.spawn((
-                        Mesh3d(water_mesh.clone()),
-                        MeshMaterial3d(water_mat),
+                        Mesh3d(particle_assets.water_mesh.clone()),
+                        MeshMaterial3d(particle_assets.water_mat.clone()),
                         Transform::from_translation(spawn_pos),
                         FireParticle {
                             velocity: stream_dir * 55.0 + Vec3::new(fastrand_range(-1.0, 1.0), 3.0, fastrand_range(-1.0, 1.0)),
@@ -180,16 +171,9 @@ fn handle_mouse_tools(
 
                         // If hot surface was hit, emit billowing white steam vapor!
                         if old_temp > 95.0 && fastrand_chance(0.35) {
-                            let steam_mesh = meshes.add(Sphere::new(0.4).mesh().ico(0).expect("sphere mesh"));
-                            let steam_mat = materials.add(StandardMaterial {
-                                base_color: Color::srgba(0.9, 0.95, 1.0, 0.5),
-                                perceptual_roughness: 0.9,
-                                unlit: true,
-                                ..default()
-                            });
                             commands.spawn((
-                                Mesh3d(steam_mesh),
-                                MeshMaterial3d(steam_mat),
+                                Mesh3d(particle_assets.steam_mesh.clone()),
+                                MeshMaterial3d(particle_assets.steam_mat.clone()),
                                 Transform::from_translation(gt.translation() + Vec3::new(0.0, 0.5, 0.0)),
                                 FireParticle {
                                     velocity: Vec3::new(

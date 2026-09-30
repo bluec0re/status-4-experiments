@@ -8,6 +8,7 @@ pub struct FireRenderingPlugin;
 impl Plugin for FireRenderingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FireVisualState>()
+            .init_resource::<ParticleAssets>()
             .add_systems(
                 Update,
                 (
@@ -18,6 +19,81 @@ impl Plugin for FireRenderingPlugin {
                     update_water_and_steam_particles,
                 ),
             );
+    }
+}
+
+/// Pre-allocated shared meshes and materials for particle types to enable GPU instancing/batching
+#[derive(Resource)]
+pub struct ParticleAssets {
+    pub flame_mesh: Handle<Mesh>,
+    pub flame_core_mat: Handle<StandardMaterial>,
+    pub flame_tongue_mat: Handle<StandardMaterial>,
+    pub smoke_mat: Handle<StandardMaterial>,
+    pub ember_mesh: Handle<Mesh>,
+    pub ember_mat: Handle<StandardMaterial>,
+    pub water_mesh: Handle<Mesh>,
+    pub water_mat: Handle<StandardMaterial>,
+    pub steam_mesh: Handle<Mesh>,
+    pub steam_mat: Handle<StandardMaterial>,
+}
+
+impl FromWorld for ParticleAssets {
+    fn from_world(world: &mut World) -> Self {
+        let mut meshes = world.resource_mut::<Assets<Mesh>>();
+        let flame_mesh = meshes.add(Sphere::new(0.5).mesh().ico(1).expect("sphere mesh"));
+        let ember_mesh = meshes.add(Sphere::new(0.12).mesh().ico(0).expect("sphere mesh"));
+        let water_mesh = meshes.add(Sphere::new(0.22).mesh().ico(0).expect("sphere mesh"));
+        let steam_mesh = meshes.add(Sphere::new(0.4).mesh().ico(0).expect("sphere mesh"));
+
+        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        let flame_core_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.92, 0.55),
+            emissive: LinearRgba::from(Color::srgb(1.0, 0.85, 0.4)) * 3.5,
+            unlit: true,
+            ..default()
+        });
+        let flame_tongue_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.38, 0.05),
+            emissive: LinearRgba::from(Color::srgb(1.0, 0.3, 0.02)) * 2.8,
+            unlit: true,
+            ..default()
+        });
+        let smoke_mat = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.12, 0.12, 0.12, 0.75),
+            perceptual_roughness: 0.95,
+            ..default()
+        });
+        let ember_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.75, 0.15),
+            emissive: LinearRgba::from(Color::srgb(1.0, 0.65, 0.1)) * 4.0,
+            unlit: true,
+            ..default()
+        });
+        let water_mat = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.35, 0.75, 1.0, 0.7),
+            perceptual_roughness: 0.1,
+            unlit: true,
+            ..default()
+        });
+        let steam_mat = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.9, 0.95, 1.0, 0.5),
+            perceptual_roughness: 0.9,
+            unlit: true,
+            ..default()
+        });
+
+        Self {
+            flame_mesh,
+            flame_core_mat,
+            flame_tongue_mat,
+            smoke_mat,
+            ember_mesh,
+            ember_mat,
+            water_mesh,
+            water_mat,
+            steam_mesh,
+            steam_mat,
+        }
     }
 }
 
@@ -62,7 +138,7 @@ pub enum ParticleType {
 pub struct EmberSparkMesh;
 
 /// 1. Manage Dynamic Point Lights for Fire Night Casting
-/// Allocates flickering warm lights to clusters of active fires
+/// Allocates flickering warm lights to clusters of active fires, respecting the fire_shadows setting
 fn manage_dynamic_fire_lights(
     mut commands: Commands,
     time: Res<Time>,
@@ -93,9 +169,13 @@ fn manage_dynamic_fire_lights(
         }
     }
 
-    // Existing active lights
+    // Existing active lights: update transforms, intensities, and shadow maps toggle
     let mut existing_lights: Vec<(Entity, Vec3)> = Vec::new();
     for (ent, mut trans, mut light, mut fire_light) in light_query.iter_mut() {
+        if light.shadow_maps_enabled != env.fire_shadows {
+            light.shadow_maps_enabled = env.fire_shadows;
+        }
+
         // Find nearest fire cluster
         if let Some(closest_idx) = fire_clusters
             .iter()
@@ -150,7 +230,7 @@ fn manage_dynamic_fire_lights(
                     color: Color::srgb(1.0, 0.52, 0.14), // warm fiery glow
                     intensity: lux,
                     range: 26.0,
-                    shadow_maps_enabled: true,
+                    shadow_maps_enabled: env.fire_shadows,
                     ..default()
                 },
                 Transform::from_translation(pos + Vec3::new(0.0, 1.2, 0.0)),
@@ -166,13 +246,14 @@ fn manage_dynamic_fire_lights(
 }
 
 /// 2. Spawn Billboard / Volumetric Flame & Smoke Particles from Active Fires
+/// Uses pre-allocated shared materials and meshes to enable single-draw-call GPU instancing
 fn spawn_flame_and_smoke_particles(
     mut commands: Commands,
     time: Res<Time>,
     env: Res<EnvironmentConditions>,
     mut visual_state: ResMut<FireVisualState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    particle_assets: Res<ParticleAssets>,
+    particle_query: Query<&FireParticle>,
     query: Query<(&GlobalTransform, &Combustible)>,
 ) {
     if env.sim_paused || env.sim_speed <= 0.0 {
@@ -183,9 +264,16 @@ fn spawn_flame_and_smoke_particles(
     visual_state.flame_timer += dt;
 
     if visual_state.flame_timer < 0.045 {
-        return; // Throttle particle spawn rate for 60fps wasm smoothness
+        return; // Throttle particle spawn rate for 60fps smoothness
     }
     visual_state.flame_timer = 0.0;
+
+    // Hard particle cap to maintain smooth 60fps even with hundreds of burning objects
+    const MAX_PARTICLES: usize = 1200;
+    let particle_count = particle_query.iter().count();
+    if particle_count >= MAX_PARTICLES {
+        return;
+    }
 
     let wind_vec3 = Vec3::new(
         env.wind_direction.x * env.wind_speed,
@@ -193,11 +281,20 @@ fn spawn_flame_and_smoke_particles(
         env.wind_direction.y * env.wind_speed,
     );
 
-    // Shared sphere mesh for particle billows
-    let particle_mesh = meshes.add(Sphere::new(0.5).mesh().ico(1).expect("sphere mesh"));
+    // Adaptive spawn chance based on count of active fires
+    let burning_count = query.iter().filter(|(_, c)| c.is_burning && c.flame_intensity >= 0.08).count();
+    let spawn_prob = if burning_count > 30 {
+        (30.0 / (burning_count as f32)).clamp(0.12, 1.0)
+    } else {
+        1.0
+    };
 
     for (gt, comb) in query.iter() {
         if !comb.is_burning || comb.flame_intensity < 0.08 {
+            continue;
+        }
+
+        if spawn_prob < 1.0 && !fastrand_chance(spawn_prob) {
             continue;
         }
 
@@ -210,16 +307,10 @@ fn spawn_flame_and_smoke_particles(
         );
         let spawn_pos = origin + random_offset;
 
-        // A. Blazing Flame Core (White-Yellow hot)
-        let core_mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.92, 0.55),
-            emissive: LinearRgba::from(Color::srgb(1.0, 0.85, 0.4)) * 3.5,
-            unlit: true,
-            ..default()
-        });
+        // A. Blazing Flame Core (White-Yellow hot) - instanced
         commands.spawn((
-            Mesh3d(particle_mesh.clone()),
-            MeshMaterial3d(core_mat),
+            Mesh3d(particle_assets.flame_mesh.clone()),
+            MeshMaterial3d(particle_assets.flame_core_mat.clone()),
             Transform::from_translation(spawn_pos).with_scale(Vec3::splat(0.6 * comb.flame_intensity)),
             FireParticle {
                 velocity: Vec3::new(0.0, fastrand_range(2.8, 5.0), 0.0) + wind_vec3 * 0.15,
@@ -231,16 +322,10 @@ fn spawn_flame_and_smoke_particles(
             },
         ));
 
-        // B. Leaping Fiery Orange Flame Tongue
-        let tongue_mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.38, 0.05),
-            emissive: LinearRgba::from(Color::srgb(1.0, 0.3, 0.02)) * 2.8,
-            unlit: true,
-            ..default()
-        });
+        // B. Leaping Fiery Orange Flame Tongue - instanced
         commands.spawn((
-            Mesh3d(particle_mesh.clone()),
-            MeshMaterial3d(tongue_mat),
+            Mesh3d(particle_assets.flame_mesh.clone()),
+            MeshMaterial3d(particle_assets.flame_tongue_mat.clone()),
             Transform::from_translation(spawn_pos + Vec3::new(0.0, 0.4, 0.0))
                 .with_scale(Vec3::splat(0.8 * comb.flame_intensity)),
             FireParticle {
@@ -253,17 +338,11 @@ fn spawn_flame_and_smoke_particles(
             },
         ));
 
-        // C. Rising Dark Smoke Plume
-        if fastrand_chance(0.45) {
-            let smoke_shade = fastrand_range(0.08, 0.18);
-            let smoke_mat = materials.add(StandardMaterial {
-                base_color: Color::srgba(smoke_shade, smoke_shade, smoke_shade, 0.75),
-                perceptual_roughness: 0.95,
-                ..default()
-            });
+        // C. Rising Dark Smoke Plume - instanced
+        if fastrand_chance(0.4) {
             commands.spawn((
-                Mesh3d(particle_mesh.clone()),
-                MeshMaterial3d(smoke_mat),
+                Mesh3d(particle_assets.flame_mesh.clone()),
+                MeshMaterial3d(particle_assets.smoke_mat.clone()),
                 Transform::from_translation(spawn_pos + Vec3::new(0.0, 1.2, 0.0))
                     .with_scale(Vec3::splat(0.6)),
                 FireParticle {
@@ -273,7 +352,7 @@ fn spawn_flame_and_smoke_particles(
                         fastrand_range(-0.5, 0.5),
                     ) + wind_vec3 * 0.55,
                     life: 0.0,
-                    max_life: fastrand_range(2.0, 4.2),
+                    max_life: fastrand_range(1.5, 3.2),
                     start_scale: 0.7,
                     end_scale: fastrand_range(2.2, 3.8),
                     particle_type: ParticleType::SmokePlume,
@@ -328,37 +407,31 @@ fn update_flame_and_smoke_particles(
 }
 
 /// 4. Render Airborne Embers & Sparks Carried by Wind
+/// Reuses existing spark entities in place without despawning and recreating every frame
 fn render_airborne_embers(
     mut commands: Commands,
     embers: Res<EmberContainer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    existing_sparks: Query<Entity, With<EmberSparkMesh>>,
+    particle_assets: Res<ParticleAssets>,
+    mut existing_sparks: Query<(Entity, &mut Transform), With<EmberSparkMesh>>,
 ) {
-    // Despawn previous frame ember spark meshes
-    for ent in existing_sparks.iter() {
-        commands.entity(ent).despawn();
-    }
-
-    if embers.embers.is_empty() {
-        return;
-    }
-
-    let spark_mesh = meshes.add(Sphere::new(0.12).mesh().ico(0).expect("sphere mesh"));
-    let spark_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.75, 0.15),
-        emissive: LinearRgba::from(Color::srgb(1.0, 0.65, 0.1)) * 4.0,
-        unlit: true,
-        ..default()
-    });
+    let mut spark_iter = existing_sparks.iter_mut();
 
     for ember in &embers.embers {
-        commands.spawn((
-            EmberSparkMesh,
-            Mesh3d(spark_mesh.clone()),
-            MeshMaterial3d(spark_mat.clone()),
-            Transform::from_translation(ember.pos),
-        ));
+        if let Some((_ent, mut trans)) = spark_iter.next() {
+            trans.translation = ember.pos;
+        } else {
+            commands.spawn((
+                EmberSparkMesh,
+                Mesh3d(particle_assets.ember_mesh.clone()),
+                MeshMaterial3d(particle_assets.ember_mat.clone()),
+                Transform::from_translation(ember.pos),
+            ));
+        }
+    }
+
+    // Despawn excess spark entities if ember count decreased
+    for (ent, _trans) in spark_iter {
+        commands.entity(ent).despawn();
     }
 }
 
