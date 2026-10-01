@@ -1,19 +1,11 @@
-mod camera;
-mod editor;
-mod road;
-mod spline;
-mod terrain;
-mod ui;
-mod vegetation;
-
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
-use camera::CameraPlugin;
-use editor::RoadEditorPlugin;
-use terrain::TerrainPlugin;
-use ui::UiPlugin;
-use vegetation::VegetationPlugin;
+use status_4_roads::camera::CameraPlugin;
+use status_4_roads::editor::RoadEditorPlugin;
+use status_4_roads::terrain::TerrainPlugin;
+use status_4_roads::ui::UiPlugin;
+use status_4_roads::vegetation::VegetationPlugin;
 
 fn main() {
     let mut app = App::new();

@@ -47,6 +47,11 @@ jobs:
           echo "Installing wasm-bindgen-cli version: $WASM_BINDGEN_VER"
           cargo binstall -y --version "$WASM_BINDGEN_VER" wasm-bindgen-cli
 
+      - name: Bundle city presets
+        run: |
+          echo "Bundling 10x10km city presets for web deployment..."
+          cd city && cargo run --bin bundle_presets
+
       - name: Build experiments
         run: |
           mkdir -p _site

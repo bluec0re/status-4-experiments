@@ -1,0 +1,25 @@
+[package]
+name = "status-4-city"
+version = "0.1.0"
+edition = "2024"
+
+default-run = "status-4-city"
+
+[dependencies]
+bevy = { version = "0.19.1", features = ["system_font_discovery"] }
+image = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+status-4-roads = { path = "../roads" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "2.10", features = ["json"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Response"] }
+
+[features]
+default = []
+web = ["bevy/web"]

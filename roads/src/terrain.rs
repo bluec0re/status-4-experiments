@@ -105,10 +105,21 @@ impl HeightmapData {
         }
     }
 
+    /// Creates a flat heightmap for custom map dimensions (e.g. 10x10 km city)
+    pub fn flat(map_size: f32, height: f32) -> Self {
+        Self {
+            width: 2,
+            height: 2,
+            map_size,
+            heights: vec![height; 4],
+        }
+    }
+
     /// Continuous bilinear sampling from the heightmap texture
     pub fn sample(&self, x: f32, z: f32) -> f32 {
-        let u = ((x + HALF_MAP) / self.map_size).clamp(0.0, 1.0);
-        let v = ((z + HALF_MAP) / self.map_size).clamp(0.0, 1.0);
+        let half_map = self.map_size * 0.5;
+        let u = ((x + half_map) / self.map_size).clamp(0.0, 1.0);
+        let v = ((z + half_map) / self.map_size).clamp(0.0, 1.0);
 
         let fx = u * (self.width - 1) as f32;
         let fz = v * (self.height - 1) as f32;

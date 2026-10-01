@@ -248,6 +248,67 @@ pub fn build_road_mesh(samples: &[SplineSample], heightmap: &HeightmapData) -> M
     mesh
 }
 
+/// Merges multiple road meshes sharing the same vertex layout into a single batch mesh.
+pub fn merge_road_meshes(meshes: &[Mesh]) -> Mesh {
+    if meshes.is_empty() {
+        return Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+    }
+    if meshes.len() == 1 {
+        return meshes[0].clone();
+    }
+
+    let mut combined_positions: Vec<[f32; 3]> = Vec::new();
+    let mut combined_normals: Vec<[f32; 3]> = Vec::new();
+    let mut combined_uvs: Vec<[f32; 2]> = Vec::new();
+    let mut combined_colors: Vec<[f32; 4]> = Vec::new();
+    let mut combined_indices: Vec<u32> = Vec::new();
+
+    for mesh in meshes {
+        let v_offset = combined_positions.len() as u32;
+
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            combined_positions.extend_from_slice(pos);
+        }
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(norm)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        {
+            combined_normals.extend_from_slice(norm);
+        }
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x2(uv)) =
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        {
+            combined_uvs.extend_from_slice(uv);
+        }
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x4(col)) =
+            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        {
+            combined_colors.extend_from_slice(col);
+        }
+
+        if let Some(Indices::U32(indices)) = mesh.indices() {
+            for &idx in indices {
+                combined_indices.push(v_offset + idx);
+            }
+        }
+    }
+
+    let mut merged = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    merged.insert_attribute(Mesh::ATTRIBUTE_POSITION, combined_positions);
+    merged.insert_attribute(Mesh::ATTRIBUTE_NORMAL, combined_normals);
+    merged.insert_attribute(Mesh::ATTRIBUTE_UV_0, combined_uvs);
+    merged.insert_attribute(Mesh::ATTRIBUTE_COLOR, combined_colors);
+    merged.insert_indices(Indices::U32(combined_indices));
+    merged
+}
+
 /// Generates bridge pillar positions where road is elevated high above terrain
 pub fn generate_bridge_pylons(
     samples: &[SplineSample],

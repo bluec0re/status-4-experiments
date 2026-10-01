@@ -1,0 +1,82 @@
+[
+  {
+    "country": "Germany",
+    "description": "Brandenburg Gate, Unter den Linden & Tiergarten",
+    "file": "berlin.json",
+    "lat": 52.5163,
+    "lon": 13.3777,
+    "name": "Berlin",
+    "size_bytes": 14878185,
+    "slug": "berlin"
+  },
+  {
+    "country": "UK",
+    "description": "Westminster, Thames bridges & historic city streets",
+    "file": "london.json",
+    "lat": 51.5007,
+    "lon": -0.1246,
+    "name": "London",
+    "size_bytes": 12273695,
+    "slug": "london"
+  },
+  {
+    "country": "USA",
+    "description": "Manhattan grid, Broadway diagonal & FDR Drive",
+    "file": "new_york.json",
+    "lat": 40.758,
+    "lon": -73.9855,
+    "name": "New York",
+    "size_bytes": 7847131,
+    "slug": "new_york"
+  },
+  {
+    "country": "France",
+    "description": "Arc de Triomphe, Champs-Élysées & Haussmann boulevards",
+    "file": "paris.json",
+    "lat": 48.8738,
+    "lon": 2.295,
+    "name": "Paris",
+    "size_bytes": 9273413,
+    "slug": "paris"
+  },
+  {
+    "country": "Italy",
+    "description": "Colosseum, Tiber riverbanks & ancient radial roads",
+    "file": "rome.json",
+    "lat": 41.8902,
+    "lon": 12.4922,
+    "name": "Rome",
+    "size_bytes": 6715403,
+    "slug": "rome"
+  },
+  {
+    "country": "USA",
+    "description": "Market Street, Embarcadero & steep grid avenues",
+    "file": "san_francisco.json",
+    "lat": 37.7879,
+    "lon": -122.4075,
+    "name": "San Francisco",
+    "size_bytes": 5220566,
+    "slug": "san_francisco"
+  },
+  {
+    "country": "Japan",
+    "description": "Shinjuku, high-density expressways & arterial ring roads",
+    "file": "tokyo.json",
+    "lat": 35.6895,
+    "lon": 139.6917,
+    "name": "Tokyo",
+    "size_bytes": 5814846,
+    "slug": "tokyo"
+  },
+  {
+    "country": "Switzerland",
+    "description": "Zürich Hauptbahnhof, Limmat riverbanks & Bahnhofstrasse",
+    "file": "zurich_hb.json",
+    "lat": 47.3779,
+    "lon": 8.5403,
+    "name": "Zurich HB",
+    "size_bytes": 6438888,
+    "slug": "zurich_hb"
+  }
+]
