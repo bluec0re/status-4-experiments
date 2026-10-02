@@ -7,7 +7,7 @@ use status_4_roads::road::{build_road_mesh, create_road_texture, merge_road_mesh
 use status_4_roads::spline::{sample_spline, RoadWaypoint};
 use status_4_roads::terrain::HeightmapData;
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 
 pub struct CityRoadsPlugin;
 
