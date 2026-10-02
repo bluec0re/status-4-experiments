@@ -407,14 +407,15 @@ fn setup_city_ui(mut commands: Commands) {
             });
 
             // ----------------------------------------------------------------
-            // BOTTOM BAR: Controls Cheat-Sheet
+            // BOTTOM BAR: Controls Cheat-Sheet & OSM Attribution
             // ----------------------------------------------------------------
             root.spawn(Node {
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 width: Val::Percent(100.0),
                 padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                row_gap: Val::Px(4.0),
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
@@ -431,6 +432,15 @@ fn setup_city_ui(mut commands: Commands) {
                         ..default()
                     },
                     TextColor(Color::srgb(0.65, 0.72, 0.82)),
+                ));
+
+                bar.spawn((
+                    Text::new("Data Source: OpenStreetMap (© OpenStreetMap contributors)"),
+                    TextFont {
+                        font_size: FontSize::Px(10.5),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.50, 0.58, 0.70)),
                 ));
             });
         });
