@@ -77,7 +77,15 @@ jobs:
             fi
 
             PKG_NAME=$(echo "$PKG_JSON" | jq -r '.name // empty')
-            BIN_NAME=$(echo "$PKG_JSON" | jq -r '.targets[]? | select(.kind[]=="bin") | .name' | head -n 1)
+            DEFAULT_RUN=$(echo "$PKG_JSON" | jq -r '(.default_run // .["default-run"]) // empty')
+            if [ -n "$DEFAULT_RUN" ] && [ "$DEFAULT_RUN" != "null" ]; then
+              BIN_NAME="$DEFAULT_RUN"
+            else
+              BIN_NAME=$(echo "$PKG_JSON" | jq -r --arg pkg "$PKG_NAME" '.targets[]? | select(.kind[]=="bin") | .name' | grep -x "$PKG_NAME" || true)
+              if [ -z "$BIN_NAME" ] || [ "$BIN_NAME" = "null" ]; then
+                BIN_NAME=$(echo "$PKG_JSON" | jq -r '.targets[]? | select(.kind[]=="bin") | .name' | head -n 1)
+              fi
+            fi
             if [ -z "$BIN_NAME" ] || [ "$BIN_NAME" = "null" ]; then
               BIN_NAME="$PKG_NAME"
             fi
@@ -86,6 +94,7 @@ jobs:
             # Build for wasm32 with bevy/web feature enabled
             cargo build \
               --manifest-path "$exp/Cargo.toml" \
+              --bin "$BIN_NAME" \
               --release \
               --target wasm32-unknown-unknown \
               --features bevy/web
