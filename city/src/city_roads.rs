@@ -7,6 +7,9 @@ use status_4_roads::road::{build_road_mesh, create_road_texture, merge_road_mesh
 use status_4_roads::spline::{sample_spline, RoadWaypoint};
 use status_4_roads::terrain::HeightmapData;
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
 pub struct CityRoadsPlugin;
